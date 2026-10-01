@@ -73,10 +73,14 @@
        · 内圈：黑胶唱片持续旋转，中央是圆形裁切的专辑封面；
                没有音源时用内置占位封面与占位歌名（data.js 的 music 段）
        · 表盘语言取自构成主义（黑方盘 / 圆 / 对角楔形 / 分段色环 /
-         斜线网点），配色接站点：红楔沿用站内 --red，描边与光环用天蓝
-       · 层次：爆开光环在最下、黑胶居中、表盘与指针在上
-         —— 所以指针压在唱片之上，光环从整个钟面后面扩出去
-       · 整块 pointer-events: none，只有折叠按钮可点，不会和扇形菜单抢点击
+          斜线网点），配色接站点：红楔沿用站内 --red，描边与光环用天蓝
+       · 层次（自下而上）：表盘纹理 → 表盘 / 色环 / 刻度 / 指针 →
+          黑胶唱片 → 拖拽层：唱片视觉上盖住时针与分针（计时逻辑不变），
+          最外圈持续扩散的光环留在最底层，从钟面背后扩出去
+       · 3D：.dial-scene 只负责 perspective，#dialClock 与 #dialVinyl 是它的
+          同级子元素，各持一份 transform —— 外层正倾、唱片反倾互不干扰
+       · 可交互的只有折叠按钮、黑胶（点击播放 / 暂停）与拖拽落点；
+          其余整块 pointer-events: none，不会和扇形菜单抢点击
        ============================================================ -->
   <aside class="dock" id="dock" aria-hidden="true">
     <button class="dock-toggle" id="dockToggle" type="button" aria-expanded="true"
@@ -85,62 +89,116 @@
     </button>
     <div class="dock-body">
       <div class="dial" id="dial" role="img" aria-label="时钟：当前时间 --:--">
-        <!-- 爆开光环：与扇形菜单的爆开同一瞬间启动 -->
-        <span class="dock-burst" aria-hidden="true"><i></i><i></i></span>
-
-        <div class="vinyl" id="vinyl" role="group" aria-label="播放信息：暂无播放">
-          <span class="vinyl-disc"><span class="vinyl-cover" id="vinylCover"></span></span>
+        <!-- 视差背景 + 持续扩散的光环：都在最底层，不与黑胶一起做反向倾斜 -->
+        <div class="dial-parallax" id="dialParallax" aria-hidden="true">
+          <span class="dial-halo"></span>
+        </div>
+        <div class="dial-rings" aria-hidden="true">
+          <i></i><i></i><i></i><i></i>
         </div>
 
-        <svg class="dial-svg" viewBox="0 0 240 240" aria-hidden="true" focusable="false">
-          <defs>
-            <pattern id="dialHatch" width="5" height="5" patternUnits="userSpaceOnUse"
-                     patternTransform="rotate(45)">
-              <rect width="5" height="5" fill="#f2f0ea"></rect>
-              <line x1="0" y1="0" x2="0" y2="5" stroke="#0d0d0f" stroke-width="1.7"></line>
-            </pattern>
-            <!-- 方盘要挖掉 r<92 的圆：否则这块不透明的黑方会盖住下面的黑胶 -->
-            <mask id="dialPlateMask">
-              <rect x="0" y="0" width="240" height="240" fill="#ffffff"></rect>
-              <circle cx="120" cy="120" r="92" fill="#000000"></circle>
-            </mask>
-          </defs>
+        <!-- 3D 舞台：perspective 只在这里声明 -->
+        <div class="dial-scene" id="dialScene">
 
-          <!-- 黑方盘（挖空的方环，只留四角）+ 天蓝描边 -->
-          <rect class="dial-plate" x="6" y="6" width="228" height="228"
-                mask="url(#dialPlateMask)"></rect>
-          <rect class="dial-plate-edge" x="6" y="6" width="228" height="228"></rect>
+          <!-- 外层时钟层：背景 / 表盘纹理 / 刻度 / 指针 / 阴影线 / 外围光圈 -->
+          <div class="dial-clock" id="dialClock">
+            <!-- 爆开光环：与扇形菜单的爆开同一瞬间启动 -->
+            <span class="dock-burst" aria-hidden="true"><i></i><i></i></span>
 
-          <!-- 四象限分段色环（r 92~108） -->
-          <path class="dial-q dial-q1" d="M120 20 A100 100 0 0 1 220 120"></path>
-          <path class="dial-q dial-q2" d="M220 120 A100 100 0 0 1 120 220"></path>
-          <path class="dial-q dial-q3" d="M120 220 A100 100 0 0 1 20 120"></path>
-          <path class="dial-q dial-q4" d="M20 120 A100 100 0 0 1 120 20"></path>
+            <!-- 表盘纹理层（CSS 画）：底色、同心刻线、放射细线、斜向排线 -->
+            <span class="dial-texture" aria-hidden="true"></span>
 
-          <!-- 表盘：r=72±20 → 覆盖 52~92，中心留给黑胶 -->
-          <circle class="dial-face" cx="120" cy="120" r="72"></circle>
-          <!-- 表盘与色环之间的细分隔环：否则右上角的米白色环会和米白表盘连成一片 -->
-          <circle class="dial-seam" cx="120" cy="120" r="92"></circle>
+            <svg class="dial-svg" viewBox="0 0 240 240" aria-hidden="true" focusable="false">
+              <defs>
+                <pattern id="dialHatch" width="5" height="5" patternUnits="userSpaceOnUse"
+                         patternTransform="rotate(45)">
+                  <rect width="5" height="5" fill="#f2f0ea"></rect>
+                  <line x1="0" y1="0" x2="0" y2="5" stroke="#0d0d0f" stroke-width="1.7"></line>
+                </pattern>
+                <!-- 阴影线图案：细密斜排线。左上分段色环用它填充，
+                     纹理跟旁边字体的冷色微光走，不再是纯黑网点 -->
+                <pattern id="dialLineHatch" width="4" height="4" patternUnits="userSpaceOnUse"
+                         patternTransform="rotate(45)">
+                  <rect width="4" height="4" fill="#0b1a2b"></rect>
+                  <line x1="0" y1="0" x2="0" y2="4" stroke="rgba(125, 211, 252, .55)"
+                        stroke-width="1"></line>
+                </pattern>
+                <!-- 同心圆细线：缩到实际尺寸后是"唱片刻纹"级的微纹理 -->
+                <pattern id="dialRings" width="2.5" height="2.5" patternUnits="userSpaceOnUse">
+                  <circle cx="1.25" cy="1.25" r=".75" fill="none"
+                          stroke="rgba(125, 211, 252, .5)" stroke-width=".34"></circle>
+                </pattern>
+                <!-- 方盘要挖掉 r<92 的圆：否则这块不透明的黑方会盖住下面的黑胶 -->
+                <mask id="dialPlateMask">
+                  <rect x="0" y="0" width="240" height="240" fill="#ffffff"></rect>
+                  <circle cx="120" cy="120" r="92" fill="#000000"></circle>
+                </mask>
+                <!-- 表盘挖掉 r<46 的圆：中心整块留给黑胶 -->
+                <mask id="dialFaceMask">
+                  <rect x="0" y="0" width="240" height="240" fill="#ffffff"></rect>
+                  <circle cx="120" cy="120" r="46" fill="#000000"></circle>
+                </mask>
+              </defs>
 
-          <!-- 构成主义对角线 + 两个角上的短棒 -->
-          <line class="dial-diagonal" x1="52" y1="188" x2="188" y2="52"></line>
-          <line class="dial-corner-red" x1="16" y1="42" x2="42" y2="16"></line>
-          <line class="dial-corner-sky" x1="198" y1="224" x2="224" y2="198"></line>
+              <!-- 黑方盘（挖空的方环，只留四角）+ 天蓝描边 -->
+              <rect class="dial-plate" x="6" y="6" width="228" height="228"
+                    mask="url(#dialPlateMask)"></rect>
+              <rect class="dial-plate-edge" x="6" y="6" width="228" height="228"></rect>
 
-          <!-- 罗马数字由 JS 生成（r=75） -->
-          <g id="dialNumerals" class="dial-numerals"></g>
+              <!-- 表盘底色 + 阴影纹理（r=72、线宽 40 → 覆盖 52~92；中心留给黑胶） -->
+              <circle class="dial-face" cx="120" cy="120" r="72"
+                      mask="url(#dialFaceMask)"></circle>
+              <circle class="dial-face-rings" cx="120" cy="120" r="72"
+                      mask="url(#dialFaceMask)"></circle>
+              <circle class="dial-face-glow" cx="120" cy="120" r="72"
+                      mask="url(#dialFaceMask)"></circle>
 
-          <!-- 时针 = 红楔（构成主义主角）；分针 = 带黑边的米白细条 -->
-          <g id="dialHour" class="dial-hand-h">
-            <polygon class="dial-wedge" points="114.6,120 125.4,120 120,54"></polygon>
-          </g>
-          <g id="dialMin" class="dial-hand-m">
-            <rect class="dial-bar" x="118.3" y="54" width="3.4" height="72"></rect>
-          </g>
-          <circle class="dial-pivot" cx="120" cy="120" r="6.4"></circle>
-          <rect class="dial-pivot-dot" x="116" y="116" width="8" height="8"
-                transform="rotate(45 120 120)"></rect>
-        </svg>
+              <!-- 四象限分段色环（r 92~108） -->
+              <path class="dial-q dial-q1" d="M120 20 A100 100 0 0 1 220 120"></path>
+              <path class="dial-q dial-q2" d="M220 120 A100 100 0 0 1 120 220"></path>
+              <path class="dial-q dial-q3" d="M120 220 A100 100 0 0 1 20 120"></path>
+              <path class="dial-q dial-q4" d="M20 120 A100 100 0 0 1 120 20"></path>
+
+              <!-- 表盘与色环之间的细分隔环：否则右上角的米白色环会和米白表盘连成一片 -->
+              <circle class="dial-seam" cx="120" cy="120" r="92"></circle>
+              <!-- 盘面内缘细亮圈：冷色微光，和旁边天蓝字呼应 -->
+              <circle class="dial-rim" cx="120" cy="120" r="52"></circle>
+
+              <!-- 放射状阴影线（r 54~90）：JS 按 3° 一根生成，只压一道极淡的机械质感 -->
+              <g class="dial-rails" mask="url(#dialFaceMask)"></g>
+
+              <!-- 构成主义对角线 + 两个角上的短棒 -->
+              <line class="dial-diagonal" x1="52" y1="188" x2="188" y2="52"></line>
+              <line class="dial-corner-red" x1="16" y1="42" x2="42" y2="16"></line>
+              <line class="dial-corner-sky" x1="198" y1="224" x2="224" y2="198"></line>
+
+              <!-- 罗马数字由 JS 生成（r=75） -->
+              <g id="dialNumerals" class="dial-numerals"></g>
+
+              <!-- 时针 = 红楔（构成主义主角）；分针 = 带黑边的米白细条 -->
+              <g id="dialHour" class="dial-hand-h">
+                <polygon class="dial-wedge" points="114.6,120 125.4,120 120,54"></polygon>
+              </g>
+              <g id="dialMin" class="dial-hand-m">
+                <rect class="dial-bar" x="118.3" y="54" width="3.4" height="72"></rect>
+              </g>
+              <circle class="dial-pivot" cx="120" cy="120" r="6.4"></circle>
+              <rect class="dial-pivot-dot" x="116" y="116" width="8" height="8"
+                    transform="rotate(45 120 120)"></rect>
+            </svg>
+          </div>
+
+          <!-- 黑胶层：与外层时钟同级 → 可独立做反向倾斜；
+               放在时钟层之后 → 视觉上直接盖住时针与分针 -->
+          <div class="dial-vinyl" id="dialVinyl">
+            <div class="vinyl" id="vinyl" role="group" aria-label="播放信息：暂无播放">
+              <span class="vinyl-disc"><span class="vinyl-cover" id="vinylCover"></span></span>
+            </div>
+            <!-- 拖拽落点：圆形，正好罩住唱片 -->
+            <div class="dial-drop" id="dialDrop" role="button" tabindex="-1"
+                 aria-label="把本地音频文件拖到这里播放"></div>
+          </div>
+        </div>
       </div>
       <div class="vinyl-meta">
         <span class="vinyl-title" id="vinylTitle">暂无播放</span>
@@ -148,7 +206,6 @@
       </div>
     </div>
   </aside>
-
   <!-- ============================================================
        扇形放射菜单
        ============================================================ -->

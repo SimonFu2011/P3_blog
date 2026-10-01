@@ -664,13 +664,20 @@ body.is-underwater .credit { opacity: .8; }
    左侧同心圆时钟 + 黑胶（第六项）
    ------------------------------------------------------------
    桌面端固定 left: 24px、垂直居中；≤900px 收成小钟按钮，点击展开。
-   整块 pointer-events: none，只有折叠按钮可点 —— 保证永远不与扇形菜单
-   抢点击（验收第 7 条"无交互冲突"）。
+   整块 pointer-events: none，只有折叠按钮 / 黑胶 / 拖拽落点可点 ——
+   保证不与扇形菜单抢点击（验收第 7 条"无交互冲突"）。
+   层次（自下而上）：视差背景 + 外围光圈（.dial-parallax / .dial-rings）
+                     → 表盘与指针（.dial-clock）
+                     → 黑胶（.dial-vinyl，视觉上盖住指针）
+   3D：.dial-scene 声明 perspective，.dial-clock 与 .dial-vinyl 是它的同级
+   子元素，各自持一份 transform —— 外层正倾、唱片反倾，互不干扰（第六项）。
    ============================================================ */
 .dock {
   /* 尺寸同时受宽高限制：矮窗口自动缩小，移动端在媒体查询里改写。
-     比上一版大约翻倍 —— 之前 176px 的上限在桌面上确实太小了。 */
-  --dial: clamp(180px, min(21vw, 42vh), 330px);
+     基准值 = 上一版的两倍（min 180→360、max 330→640），
+     视口比例项也翻倍后受 38vw / 56vh 约束 —— 于是窄屏与矮窗口
+     不会把面板顶出屏幕，桌面上是真的 2 倍大。 */
+  --dial: clamp(300px, min(38vw, 56vh), 640px);
   position: absolute;
   left: 24px; top: 50%;
   translate: 0 -50%;
@@ -704,49 +711,111 @@ body.is-underwater .credit { opacity: .8; }
   width: 100%;
 }
 
-/* 表盘与黑胶叠在同一个方盒里：爆开光环最下、黑胶居中、表盘指针在上 */
-.dial { position: relative; width: var(--dial); height: var(--dial); }
+/* 方盒：表盘、黑胶、光环、纹理全叠在这里 */
+.dial {
+  position: relative; width: var(--dial); height: var(--dial);
+  /* 3D 倾斜与视差共用的鼠标归一化坐标（JS 写，rAF 节流） */
+  --mx: 0;
+  --my: 0;
+  --tilt: 1;                 /* 主动效强度系数，移动端 / 减少动态时归零 */
+}
 .dial-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 
-/* ---- 构成主义表盘 ----
-   参考图的语汇：黑方盘、大圆、对角楔形、分段色环、斜线网点、粗壮无衬线数字。
-   黑白红本是构成主义原色，这里保留红楔（沿用站内 --red），把方盘描边与爆开
-   光环换成天蓝，于是既成立又仍然"以天蓝为主"（第六项第 7 条）。 */
-.dial-plate { fill: #0d0d0f; }
-.dial-plate-edge { fill: none; stroke: var(--sky); stroke-width: 2.5; }
-/* 四象限色环：r=100、线宽 16 → 覆盖 92~108 */
-.dial-q { fill: none; stroke-width: 16; }
-.dial-q1 { stroke: #f2f0ea; }              /* 右上：米白 */
-.dial-q2 { stroke: var(--sky); }           /* 右下：天蓝 */
-.dial-q3 { stroke: #1b1b21; }              /* 左下：近黑（比方盘亮一点，看得出分段） */
-.dial-q4 { stroke: url(#dialHatch); }      /* 左上：斜线网点（参考图里那块网点） */
-/* r=72、线宽 40 → 正好覆盖 52~92；中心 r<52 保持透明，把位置留给黑胶 */
-.dial-face { fill: none; stroke: #f2f0ea; stroke-width: 40; }
-/* 表盘与色环之间的细分隔环（构成主义爱用的粗轮廓） */
-.dial-seam { fill: none; stroke: #0d0d0f; stroke-width: 2.2; }
-/* 对角线压到近黑低透明：红楔才是主角，斜线只做构成骨架 */
-.dial-diagonal { stroke: #0d0d0f; stroke-width: 1.6; opacity: .3; }
-.dial-corner-red { stroke: var(--red); stroke-width: 5; }
-.dial-corner-sky { stroke: var(--sky); stroke-width: 5; }
-/* 数字用站内的粗体英文族（Bahnschrift / Impact），构成主义的字型感 */
-.dial-numeral {
-  font-family: var(--font-en); font-weight: 900; font-size: 16px;
-  fill: #0d0d0f; text-anchor: middle; dominant-baseline: middle;
+/* 3D 舞台：perspective 只在这里声明，两个子层共用同一透视 */
+.dial-scene {
+  position: absolute; inset: 0;
+  perspective: 1000px;
+  perspective-origin: 50% 50%;
 }
-/* 时针 = 红楔（主角）；分针 = 带黑边的天蓝细条 —— 天蓝在黑胶与米白盘上
-   都看得见，红 + 蓝的搭配也正是构成主义的配色 */
-.dial-wedge { fill: var(--red); stroke: #0d0d0f; stroke-width: 1.4; }
-.dial-bar { fill: var(--sky); stroke: #0d0d0f; stroke-width: 1.4; }
-.dial-pivot { fill: #0d0d0f; stroke: #f2f0ea; stroke-width: 2.2; }
-.dial-pivot-dot { fill: var(--red); }
+/* 两个同级 3D 层：外层时钟正倾、黑胶反倾 */
+.dial-clock,
+.dial-vinyl {
+  position: absolute; inset: 0;
+  transform-style: preserve-3d;
+  transform-origin: 50% 50%;
+  will-change: transform;
+  transition: transform .18s cubic-bezier(.22, .61, .36, 1);
+}
+/* 离开时复位要更"缓"一点，避免松手一刹那的硬切 */
+.dial.is-idle .dial-clock,
+.dial.is-idle .dial-vinyl { transition-duration: .5s; }
 
-/* ---- 爆开光环：与扇形菜单同时炸开（第六项第 2 条） ----
-   放在黑胶与表盘之下，所以光环是从整个钟面背后扩出去的。 */
+/* 鼠标位置 → 外层时钟 tilt；--tilt-x/--tilt-y = 方向 * 强度（带角度单位） */
+.dial-clock {
+  --tilt-x: calc(var(--mx) * 7deg * var(--tilt, 1));
+  --tilt-y: calc(var(--my) * -7deg * var(--tilt, 1));
+  transform: rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
+}
+/* 黑胶：完全反号（-0.5 倍），幅度约为外层的一半 —— 形成反向错位又不混乱 */
+.dial-vinyl {
+  --tilt-x: calc(var(--mx) * -3.5deg * var(--tilt, 1));
+  --tilt-y: calc(var(--my) * 3.5deg * var(--tilt, 1));
+  transform: rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
+  z-index: 2;                /* 该层整体压在时钟层（含指针）之上 */
+}
+
+/* 视差背景：方向与鼠标相反（--mx 取负）、幅度远小于鼠标位移，
+   配合底部的暗晕做景深。不属于 3D 层，所以不参与 3D 倾斜。 */
+.dial-parallax {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 50%,
+      rgba(4, 16, 30, 0) 50%,
+      rgba(5, 20, 38, .38) 74%,
+      rgba(3, 12, 24, .72) 100%);
+  box-shadow: 0 26px 60px -34px rgba(0, 0, 0, .9);
+  transform: translate3d(calc(var(--mx) * -11px * var(--tilt, 1)),
+                         calc(var(--my) * -7px * var(--tilt, 1)), 0);
+  transition: transform .18s cubic-bezier(.22, .61, .36, 1);
+}
+.dial.is-idle .dial-parallax { transition-duration: .5s; }
+/* 表盘边缘的冷色呼吸光：光圈的"静止态"，保证任何时刻都有一圈微光 */
+.dial-halo {
+  position: absolute; inset: 6%;
+  border-radius: 50%;
+  box-shadow: 0 0 34px rgba(56, 189, 248, .22), inset 0 0 26px rgba(56, 189, 248, .12);
+  animation: dialHalo 5.6s ease-in-out infinite;
+}
+@keyframes dialHalo {
+  0%, 100% { opacity: .48; }
+  50%      { opacity: .9; }
+}
+
+/* ---- 最外围持续扩散的光环（第六项第 7 条） ----
+   多层圆环、不同 animation-delay，3.6s 一轮 → 连续不断地向外发出。
+   动画只用 transform + opacity；整层 pointer-events: none，
+   且在两个 3D 层之下，不会挡住指针、黑胶或拖拽。 */
+/* 悬停态：整块时钟（含未被命中的盘面）的识别交给 JS 在 window 上跟踪，
+   因为 .dock / .dial 是 pointer-events: none，元素本身收不到 hover */
+.dial.is-hover .dial-halo { animation-duration: 3.2s; }
+
+.dial-rings { position: absolute; inset: 0; pointer-events: none; }
+.dial-rings i {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid var(--sky);
+  opacity: 0;
+}
+.dial-rings i:nth-child(2) { border-color: rgba(125, 211, 252, .85); }
+.dial-rings i:nth-child(3) { border-color: rgba(2, 132, 199, .9); }
+.dial-rings i:nth-child(4) { border-color: rgba(242, 240, 234, .5); }
+.dock.is-on .dial-rings i { animation: dialPulse 3.6s cubic-bezier(.2, .6, .3, 1) infinite; }
+.dock.is-on .dial-rings i:nth-child(2) { animation-delay: .9s; }
+.dock.is-on .dial-rings i:nth-child(3) { animation-delay: 1.8s; }
+.dock.is-on .dial-rings i:nth-child(4) { animation-delay: 2.7s; }
+@keyframes dialPulse {
+  0%   { opacity: 0;    transform: scale(.8); }
+  10%  { opacity: .5; }
+  60%  { opacity: .14; }
+  100% { opacity: 0;    transform: scale(1.4); }
+}
+
+/* 爆开光环：与扇形菜单同时炸开（第六项第 2 条）。
+   在时钟层内，因此会跟着外层时钟一起 3D 倾斜 —— 与持续光圈同一层级。 */
 .dock-burst { position: absolute; inset: 0; pointer-events: none; }
 .dock-burst i {
-  position: absolute; inset: 0; margin: auto;
-  /* 100% = 表盘外接方，r 相当于 120：光环从钟面背后（r≈72）扩到 r≈192 */
-  width: 100%; aspect-ratio: 1 / 1;
+  position: absolute; inset: 0;
   border: 2px solid var(--sky);
   border-radius: 50%;
   opacity: 0;
@@ -760,20 +829,125 @@ body.is-underwater .credit { opacity: .8; }
   100% { opacity: 0; scale: 1.6; }
 }
 
+/* ---- 表盘阴影线 / 纹理（第六项第 7 条） ----
+   同心刻线（repeating-radial）+ 放射细线（repeating-conic）+ 斜向排线，
+   色值全部取自旁边字体的冷色微光（--sky 系），低对比、随半径渐隐，
+   只压在 r 52~92 的盘面区间，不盖指针与黑胶。 */
+.dial-texture {
+  --face: 76.7%;            /* 2 * 92 / 240：表盘外缘 */
+  position: absolute; left: 50%; top: 50%;
+  width: var(--face); aspect-ratio: 1 / 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: .92;
+  background:
+    /* 放射状细线：每 3deg 一根，越靠外越清晰 */
+    repeating-conic-gradient(from 0deg at 50% 50%,
+      rgba(125, 211, 252, .16) 0deg .4deg,
+      rgba(125, 211, 252, 0)   .4deg 3deg),
+    /* 斜向排线：构成主义那点网点味，1.5px 一级 */
+    repeating-linear-gradient(45deg,
+      rgba(125, 211, 252, .085) 0 1px,
+      rgba(125, 211, 252, 0)    1px 4px),
+    /* 同心刻线：密处像唱片刻纹，疏处像机械表盘的分度圈 */
+    repeating-radial-gradient(circle at 50% 50%,
+      rgba(125, 211, 252, .13) 0 1px,
+      rgba(125, 211, 252, 0)   1px 5px),
+    repeating-radial-gradient(circle at 50% 50%,
+      rgba(125, 211, 252, .06) 0 1px,
+      rgba(125, 211, 252, 0)   1px 2px);
+  /* 中心（留给黑胶）与外缘（接色环）都淡出，读时不受干扰 */
+  -webkit-mask-image: radial-gradient(circle at 50% 50%,
+    transparent 0 53%, #000 60%, #000 88%, transparent 99%);
+          mask-image: radial-gradient(circle at 50% 50%,
+    transparent 0 53%, #000 60%, #000 88%, transparent 99%);
+}
+
+/* ---- 构成主义表盘 ----
+   参考图的语汇：黑方盘、大圆、对角楔形、分段色环、斜线网点、粗壮无衬线数字。
+   黑白红本是构成主义原色，这里保留红楔（沿用站内 --red），把方盘描边与爆开
+   光环换成天蓝，于是既成立又仍然"以天蓝为主"（第六项第 7 条）。 */
+.dial-plate { fill: #081524; }
+.dial-plate-edge { fill: none; stroke: var(--sky); stroke-width: 2.5; }
+/* 四象限色环：r=100、线宽 16 → 覆盖 92~108 */
+.dial-q { fill: none; stroke-width: 16; }
+.dial-q1 { stroke: #f2f0ea; }              /* 右上：米白 */
+.dial-q2 { stroke: var(--sky); }           /* 右下：天蓝 */
+.dial-q3 { stroke: #12293d; }              /* 左下：深青（比方盘亮一点，看得出分段） */
+.dial-q4 { stroke: url(#dialLineHatch); }  /* 左上：冷色斜排线（原为纯黑网点） */
+/* r=72、线宽 40 → 覆盖 52~92；中心 r<46 挖空，把位置留给黑胶 */
+.dial-face { fill: none; stroke: #f2f0ea; stroke-width: 40; }
+/* 同心刻线图案再压一层，纹理落在盘面而不是指针上 */
+.dial-face-rings { fill: none; stroke: url(#dialRings); stroke-width: 40; opacity: .55; }
+/* 盘面内缘的冷色微光：与旁边天蓝字呼应，也给黑胶一圈边光 */
+.dial-face-glow {
+  fill: none; stroke: rgba(56, 189, 248, .4); stroke-width: 40;
+  opacity: .5;
+  -webkit-mask-image: radial-gradient(circle at 50% 50%,
+    #000 0 74%, rgba(0, 0, 0, .25) 84%, transparent 96%);
+          mask-image: radial-gradient(circle at 50% 50%,
+    #000 0 74%, rgba(0, 0, 0, .25) 84%, transparent 96%);
+}
+/* 表盘与色环之间的细分隔环（构成主义爱用的粗轮廓） */
+.dial-seam { fill: none; stroke: #081524; stroke-width: 2.2; }
+/* 盘面内缘细亮圈：黑色在内、冷光在外，把黑胶"框"进表盘 */
+.dial-rim { fill: none; stroke: rgba(125, 211, 252, .5); stroke-width: .9; }
+/* 放射状阴影线：JS 按 3deg 生成，只做骨架，不与刻度抢读时 */
+.dial-rail { stroke: rgba(56, 189, 248, .17); stroke-width: .9; }
+/* 对角线压到近黑低透明：红楔才是主角，斜线只做构成骨架 */
+.dial-diagonal { stroke: #0d0d0f; stroke-width: 1.6; opacity: .3; }
+.dial-corner-red { stroke: var(--red); stroke-width: 5; }
+.dial-corner-sky { stroke: var(--sky); stroke-width: 5; }
+/* 数字用站内的粗体英文族（Bahnschrift / Impact），构成主义的字型感；
+   深底上填米白 + 冷色微光，和旁边的歌名 / 副标题同一套语言 */
+.dial-numeral {
+  font-family: var(--font-en); font-weight: 900; font-size: 16px;
+  fill: #f2f0ea; text-anchor: middle; dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: rgba(56, 189, 248, .85);
+  stroke-width: .7px;
+}
+/* 时针 = 红楔（主角）；分针 = 带黑边的天蓝细条 —— 天蓝在黑胶与米白盘上
+   都看得见，红 + 蓝的搭配也正是构成主义的配色。
+   两者都在时钟层里，因此会被黑胶层整块盖住（第六项第 2 条）。 */
+.dial-wedge { fill: var(--red); stroke: #0d0d0f; stroke-width: 1.4; }
+.dial-bar { fill: var(--sky); stroke: #0d0d0f; stroke-width: 1.4; }
+.dial-pivot { fill: #081524; stroke: #f2f0ea; stroke-width: 2.2; }
+.dial-pivot-dot { fill: var(--red); }
+
+/* ---- 黑胶层 ---- */
+.dial-vinyl { pointer-events: none; }
 .vinyl { position: absolute; inset: 0; display: grid; place-items: center; }
 .vinyl-disc {
   position: relative; display: block;
-  /* 46%：比表盘内缘（52）略大一圈，塞进表盘下面，接缝处因此不会露白边 */
+  /* 46%：比表盘内缘（52）略大一圈，正好把指针整段盖住，
+     接缝处也因此不会露出底下的盘面 */
   width: 46%; aspect-ratio: 1 / 1;
   border-radius: 50%;
+  cursor: pointer;
+  pointer-events: auto;      /* 整块不可点，只有唱片（播放 / 暂停）可点 */
   border: 1px solid rgba(125, 211, 252, .4);
   background:
+    /* 刻纹：疏密两层同心细线，和表盘的冷色阴影线同源 */
     repeating-radial-gradient(circle at 50% 50%, rgba(125, 211, 252, .09) 0 1px, transparent 1px 4px),
+    repeating-radial-gradient(circle at 50% 50%, rgba(125, 211, 252, .055) 0 1px, transparent 1px 2px),
+    /* 唱片高光：左上冷光、右下压暗，和黑胶"反倾"一起读得出体积 */
+    radial-gradient(circle at 32% 26%, rgba(125, 211, 252, .16) 0%, rgba(125, 211, 252, 0) 46%),
     radial-gradient(circle at 50% 50%, #0b2b45 0%, #04121e 74%);
   box-shadow: inset 0 0 18px rgba(56, 189, 248, .28), 0 6px 20px -10px rgba(0, 0, 0, .8);
+  transition: box-shadow .25s ease, scale .3s cubic-bezier(.2, 1.2, .4, 1),
+              border-color .25s ease;
 }
 .vinyl-disc.is-spinning { animation: vinylSpin 12s linear infinite; }
 @keyframes vinylSpin { to { rotate: 360deg; } }
+/* 播放中的边缘微光：看得出来"在放" */
+.vinyl-disc.is-playing {
+  border-color: rgba(125, 211, 252, .75);
+  box-shadow: inset 0 0 22px rgba(56, 189, 248, .38),
+              0 0 26px rgba(56, 189, 248, .3),
+              0 6px 20px -10px rgba(0, 0, 0, .8);
+}
 
 /* 圆形裁切的封面；没有封面图时留一个偏心高光的占位盘，
    顺便让"在黑胶上转"这件事看得出来 */
@@ -790,6 +964,38 @@ body.is-underwater .credit { opacity: .8; }
   content: ""; position: absolute; left: 50%; top: 50%;
   width: 12%; height: 12%; margin: -6% 0 0 -6%;
   border-radius: 50%; background: rgba(3, 20, 32, .85);
+}
+
+/* ---- 拖拽落点（第六项：把本地音频拖到唱片上） ----
+   正好罩住唱片；平时 pointer-events: none（不抢菜单点击），
+   只有拖拽期间 .dial.is-dragging 才接受 drop。 */
+.dial-drop {
+  position: absolute; left: 50%; top: 50%;
+  width: 46%; aspect-ratio: 1 / 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.dial.is-dragging .dial-drop { pointer-events: auto; }
+/* 拖入反馈：唱片高亮、放大、发光（视觉反馈明确且不改变布局） */
+.dial.is-dragging .vinyl-disc {
+  border-color: var(--sky-2);
+  scale: 1.05;
+  box-shadow: inset 0 0 26px rgba(56, 189, 248, .5),
+              0 0 34px rgba(56, 189, 248, .45),
+              0 6px 20px -10px rgba(0, 0, 0, .8);
+}
+/* 光圈也跟着亮一档，等于"这里可以放"的提示 */
+.dial.is-dragging .dial-halo {
+  box-shadow: 0 0 44px rgba(56, 189, 248, .45), inset 0 0 30px rgba(56, 189, 248, .22);
+}
+/* 非音频文件：抖一下 + 红光提示 */
+.dial.is-reject .vinyl-disc { animation: discReject .44s cubic-bezier(.36, .07, .19, .97); }
+@keyframes discReject {
+  0%, 100% { translate: 0 0; box-shadow: inset 0 0 18px rgba(56, 189, 248, .28); }
+  20%      { translate: -4% 0; box-shadow: inset 0 0 22px rgba(255, 31, 61, .55); }
+  55%      { translate: 4% 0; }
+  80%      { translate: -2% 0; box-shadow: inset 0 0 22px rgba(255, 31, 61, .4); }
 }
 
 /* 歌名与副标题随表盘一起缩放：固定 px 在大钟上会显得很小 */
@@ -811,6 +1017,8 @@ body.is-underwater .credit { opacity: .8; }
   color: var(--sky);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* 提示态（"不是音频文件"）：沿用副标题的排版，只换色 */
+.vinyl-sub.is-warn { color: var(--red-2); }
 
 /* 折叠按钮：桌面端不显示，窄屏显示 */
 .dock-toggle {
@@ -839,6 +1047,8 @@ body.is-underwater .credit { opacity: .8; }
 /* 页面隐藏时暂停"持续波动"类 CSS 动画（水波由 JS 那边暂停） */
 body.is-page-hidden .entry-name::after,
 body.is-page-hidden .arrow-svg,
+body.is-page-hidden .dial-rings i,
+body.is-page-hidden .dial-halo,
 body.is-page-hidden .vinyl-disc.is-spinning,
 body.is-page-hidden .water-grain,
 body.is-page-hidden .sunbeams,
@@ -862,7 +1072,7 @@ body.is-page-hidden .bubble {
   /* 第六项第 3 条：移动端收成小钟按钮，点击展开；展开后是一块浮层，
      尺寸改由宽度主导（原来的 11vw 在窄屏上小到看不清刻度） */
   .dock {
-    --dial: clamp(150px, min(66vw, 46vh), 300px);
+    --dial: clamp(240px, min(62vw, 46vh), 380px);
     left: 12px;
   }
   .dock-toggle { display: grid; }
@@ -894,4 +1104,27 @@ body.is-page-hidden .bubble {
     opacity: 1;
     translate: none;
   }
+}
+
+/* ============================================================
+   触屏 / 粗指针：不做 3D 倾斜与视差（第六项第 6 条的降级处理）
+   ------------------------------------------------------------
+   倾斜由 dock.js 里的 pointerType === 'mouse' 判定，这里再把过渡一起停掉，
+   保证触屏上时钟是稳定的一层平面 —— 拖拽高亮与光圈动画仍然保留。
+   ============================================================ */
+@media (hover: none), (pointer: coarse) {
+  .dial-clock,
+  .dial-vinyl,
+  .dial-parallax { transform: none !important; }
+}
+
+/* 尊重"减少动态效果"时的时钟：倾斜 / 视差 / 持续光圈全部停下 */
+@media (prefers-reduced-motion: reduce) {
+  .dial-clock,
+  .dial-vinyl,
+  .dial-parallax { transform: none !important; }
+  .dial-rings i,
+  .dial-halo { animation: none !important; }
+  .dial-rings i { opacity: 0 !important; }
+  .dial-halo { opacity: .7; }
 }
