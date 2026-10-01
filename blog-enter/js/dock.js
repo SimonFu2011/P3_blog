@@ -14,8 +14,8 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const ROMAN = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
-  const CX = 100, CY = 100;      // 表盘圆心（viewBox 200×200）
-  const NUM_R = 72;              // 罗马数字所在半径
+  const CX = 120, CY = 120;      // 表盘圆心（viewBox 240×240）
+  const NUM_R = 75;              // 罗马数字所在半径（分段色环内缘 92 之内）
   const COLLAPSE_MAX = 900;      // 窄于此宽度默认折叠
 
   const pad2 = (n) => (n < 10 ? '0' + n : String(n));

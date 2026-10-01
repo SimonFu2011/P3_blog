@@ -668,49 +668,103 @@ body.is-underwater .credit { opacity: .8; }
    抢点击（验收第 7 条"无交互冲突"）。
    ============================================================ */
 .dock {
-  /* 尺寸同时受宽高限制：矮窗口会自动缩小，移动端在媒体查询里改写 */
-  --dial: clamp(104px, min(11vw, 23vh), 176px);
+  /* 尺寸同时受宽高限制：矮窗口自动缩小，移动端在媒体查询里改写。
+     比上一版大约翻倍 —— 之前 176px 的上限在桌面上确实太小了。 */
+  --dial: clamp(180px, min(21vw, 42vh), 330px);
   position: absolute;
   left: 24px; top: 50%;
   translate: 0 -50%;
   z-index: 30;
-  display: flex; flex-direction: column; align-items: center; gap: 10px;
-  width: calc(var(--dial) + 28px);
-  padding: 12px 12px 10px;
-  border-left: 2px solid rgba(56, 189, 248, .5);
-  border-radius: 14px;
-  background: linear-gradient(150deg, rgba(6, 20, 49, .5), rgba(3, 11, 30, .22));
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  width: calc(var(--dial) + 30px);
+  padding: 14px 14px 12px;
+  border-left: 3px solid var(--sky);
+  border-radius: 4px;
+  background: linear-gradient(150deg, rgba(6, 20, 49, .58), rgba(3, 11, 30, .26));
   backdrop-filter: blur(4px);
   color: var(--sky-2);
   opacity: 0; visibility: hidden;
   transition: opacity .5s ease, visibility .5s;
   pointer-events: none;
 }
-.dock.is-on { opacity: 1; visibility: visible; }
+.dock.is-on {
+  opacity: 1; visibility: visible;
+  animation: dockIn 460ms cubic-bezier(.16, .9, .2, 1) 200ms both;
+}
+/* 爆开而入：延迟 200ms，正好压在扇形菜单第一条飞出（220ms）的那一刻，
+   于是时钟与菜单是同一个"爆开"动作，而不是各淡各的。
+   scale / rotate 是独立变换属性，不会顶掉定位用的 translate。 */
+@keyframes dockIn {
+  0%   { opacity: 0; scale: .84; rotate: -2.6deg; }
+  55%  { opacity: 1; }
+  100% { opacity: 1; scale: 1; rotate: 0deg; }
+}
 .dock-body {
   display: flex; flex-direction: column; align-items: center; gap: 10px;
   width: 100%;
 }
 
-/* 表盘与黑胶叠在同一个方盒里：唱片在下、表盘指针在上 */
+/* 表盘与黑胶叠在同一个方盒里：爆开光环最下、黑胶居中、表盘指针在上 */
 .dial { position: relative; width: var(--dial); height: var(--dial); }
 .dial-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.dial-rim { fill: none; stroke: rgba(56, 189, 248, .55); stroke-width: 1.6; }
-.dial-rim2 { fill: none; stroke: rgba(125, 211, 252, .22); stroke-width: .8; }
-.dial-rim3 { fill: none; stroke: rgba(56, 189, 248, .35); stroke-width: 1; }
+
+/* ---- 构成主义表盘 ----
+   参考图的语汇：黑方盘、大圆、对角楔形、分段色环、斜线网点、粗壮无衬线数字。
+   黑白红本是构成主义原色，这里保留红楔（沿用站内 --red），把方盘描边与爆开
+   光环换成天蓝，于是既成立又仍然"以天蓝为主"（第六项第 7 条）。 */
+.dial-plate { fill: #0d0d0f; }
+.dial-plate-edge { fill: none; stroke: var(--sky); stroke-width: 2.5; }
+/* 四象限色环：r=100、线宽 16 → 覆盖 92~108 */
+.dial-q { fill: none; stroke-width: 16; }
+.dial-q1 { stroke: #f2f0ea; }              /* 右上：米白 */
+.dial-q2 { stroke: var(--sky); }           /* 右下：天蓝 */
+.dial-q3 { stroke: #1b1b21; }              /* 左下：近黑（比方盘亮一点，看得出分段） */
+.dial-q4 { stroke: url(#dialHatch); }      /* 左上：斜线网点（参考图里那块网点） */
+/* r=72、线宽 40 → 正好覆盖 52~92；中心 r<52 保持透明，把位置留给黑胶 */
+.dial-face { fill: none; stroke: #f2f0ea; stroke-width: 40; }
+/* 表盘与色环之间的细分隔环（构成主义爱用的粗轮廓） */
+.dial-seam { fill: none; stroke: #0d0d0f; stroke-width: 2.2; }
+/* 对角线压到近黑低透明：红楔才是主角，斜线只做构成骨架 */
+.dial-diagonal { stroke: #0d0d0f; stroke-width: 1.6; opacity: .3; }
+.dial-corner-red { stroke: var(--red); stroke-width: 5; }
+.dial-corner-sky { stroke: var(--sky); stroke-width: 5; }
+/* 数字用站内的粗体英文族（Bahnschrift / Impact），构成主义的字型感 */
 .dial-numeral {
-  font-family: var(--font-num); font-size: 13.5px;
-  fill: var(--sky-2); text-anchor: middle; dominant-baseline: middle;
+  font-family: var(--font-en); font-weight: 900; font-size: 16px;
+  fill: #0d0d0f; text-anchor: middle; dominant-baseline: middle;
 }
-.dial-hand { stroke: var(--sky-2); stroke-linecap: round; }
-.dial-hand-h { stroke-width: 4.6; }
-.dial-hand-m { stroke: var(--sky); stroke-width: 2.4; }
-.dial-pivot { fill: var(--sky); }
+/* 时针 = 红楔（主角）；分针 = 带黑边的天蓝细条 —— 天蓝在黑胶与米白盘上
+   都看得见，红 + 蓝的搭配也正是构成主义的配色 */
+.dial-wedge { fill: var(--red); stroke: #0d0d0f; stroke-width: 1.4; }
+.dial-bar { fill: var(--sky); stroke: #0d0d0f; stroke-width: 1.4; }
+.dial-pivot { fill: #0d0d0f; stroke: #f2f0ea; stroke-width: 2.2; }
+.dial-pivot-dot { fill: var(--red); }
+
+/* ---- 爆开光环：与扇形菜单同时炸开（第六项第 2 条） ----
+   放在黑胶与表盘之下，所以光环是从整个钟面背后扩出去的。 */
+.dock-burst { position: absolute; inset: 0; pointer-events: none; }
+.dock-burst i {
+  position: absolute; inset: 0; margin: auto;
+  /* 100% = 表盘外接方，r 相当于 120：光环从钟面背后（r≈72）扩到 r≈192 */
+  width: 100%; aspect-ratio: 1 / 1;
+  border: 2px solid var(--sky);
+  border-radius: 50%;
+  opacity: 0;
+}
+.dock-burst i:nth-child(2) { border-color: var(--red); }
+.dock.is-on .dock-burst i { animation: dockBurst 820ms cubic-bezier(.15, .7, .2, 1) 180ms both; }
+.dock.is-on .dock-burst i:nth-child(2) { animation-delay: 300ms; }
+@keyframes dockBurst {
+  0%   { opacity: 0; scale: .6; }
+  16%  { opacity: .95; }
+  100% { opacity: 0; scale: 1.6; }
+}
 
 .vinyl { position: absolute; inset: 0; display: grid; place-items: center; }
 .vinyl-disc {
   position: relative; display: block;
-  width: 44%; aspect-ratio: 1 / 1;
+  /* 46%：比表盘内缘（52）略大一圈，塞进表盘下面，接缝处因此不会露白边 */
+  width: 46%; aspect-ratio: 1 / 1;
   border-radius: 50%;
   border: 1px solid rgba(125, 211, 252, .4);
   background:
@@ -738,16 +792,23 @@ body.is-underwater .credit { opacity: .8; }
   border-radius: 50%; background: rgba(3, 20, 32, .85);
 }
 
-.vinyl-meta { width: 100%; text-align: center; }
+/* 歌名与副标题随表盘一起缩放：固定 px 在大钟上会显得很小 */
+.vinyl-meta { position: relative; width: 100%; padding-top: 10px; text-align: center; }
+/* 一条小红棒：构成主义的重音 */
+.vinyl-meta::before {
+  content: ""; position: absolute; left: 50%; top: 0;
+  width: 32px; height: 3px; margin-left: -16px; background: var(--red);
+}
 .vinyl-title {
   display: block; max-width: 100%;
-  font-size: 12px; letter-spacing: .14em; color: var(--sky-2);
+  font-size: calc(var(--dial) * 0.056); letter-spacing: .12em; color: #f2f0ea;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .vinyl-sub {
-  display: block; max-width: 100%;
-  font-family: var(--font-num); font-size: 10px; letter-spacing: .26em;
-  color: rgba(125, 211, 252, .62);
+  display: block; max-width: 100%; margin-top: 3px;
+  font-family: var(--font-en); font-weight: 900;
+  font-size: calc(var(--dial) * 0.042); letter-spacing: .22em;
+  color: var(--sky);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
@@ -755,7 +816,7 @@ body.is-underwater .credit { opacity: .8; }
 .dock-toggle {
   display: none;
   place-items: center;
-  width: 46px; height: 46px;
+  width: 56px; height: 56px;
   padding: 0;
   border: 1px solid rgba(56, 189, 248, .55);
   border-radius: 50%;
@@ -766,12 +827,12 @@ body.is-underwater .credit { opacity: .8; }
 }
 .dt-face {
   position: relative; display: block;
-  width: 22px; height: 22px;
-  border: 1.4px solid currentColor; border-radius: 50%;
+  width: 26px; height: 26px;
+  border: 1.6px solid currentColor; border-radius: 50%;
 }
-.dt-hand { position: absolute; left: 50%; top: 50%; display: block; background: currentColor; transform-origin: 0 50%; }
-.dt-h { width: 6px; height: 1.8px; margin-top: -.9px; transform: rotate(-60deg); }
-.dt-m { width: 8px; height: 1.4px; margin-top: .9px; transform: rotate(40deg); }
+.dt-hand { position: absolute; left: 50%; top: 50%; display: block; transform-origin: 0 50%; }
+.dt-h { width: 7px; height: 2.6px; margin-top: -1.3px; background: var(--red); transform: rotate(-60deg); }
+.dt-m { width: 9px; height: 1.6px; margin-top: 1px; background: currentColor; transform: rotate(40deg); }
 .dock-toggle:hover { color: var(--sky); border-color: var(--sky); }
 .dock-toggle:focus-visible { outline: 3px solid var(--sky-deep); outline-offset: 4px; }
 
@@ -799,9 +860,9 @@ body.is-page-hidden .bubble {
   .entry-inner { transform: translateY(-2vh); }
 
   /* 第六项第 3 条：移动端收成小钟按钮，点击展开；展开后是一块浮层，
-     尺寸也改由宽度主导（原来的 11vw 在窄屏上会小到看不清刻度） */
+     尺寸改由宽度主导（原来的 11vw 在窄屏上小到看不清刻度） */
   .dock {
-    --dial: clamp(96px, min(46vw, 34vh), 168px);
+    --dial: clamp(150px, min(66vw, 46vh), 300px);
     left: 12px;
   }
   .dock-toggle { display: grid; }
