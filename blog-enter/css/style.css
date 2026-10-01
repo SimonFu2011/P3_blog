@@ -1,0 +1,559 @@
+/* ============================================================
+   PERSONAL SITE — 落水而入
+   ------------------------------------------------------------
+   配色：纯白 → 青蓝水色 → 红强调（P3R 取向）
+   排版：超粗斜体、纵向叠压、硬阴影分层
+   ============================================================ */
+
+/* ============================================================
+   水位变量 --fall
+   ------------------------------------------------------------
+   注册成可动画的数值后，CSS 动画就能直接把它从 0 推到 1。
+   这样坠落完全走文档时间轴：即使 JS 被节流，水位也一定落到终值。
+   0 = 水面之上（纯白），1 = 水下
+   ============================================================ */
+@property --fall {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+:root {
+  --white: #ffffff;
+  --paper: #f4fbff;
+  --ink: #071523;
+  --ink-2: #0d2438;
+  --teal: #0b3446;
+  --teal-2: #14536b;
+  --cyan: #35d3ff;
+  --cyan-2: #7fe6ff;
+  --blue: #1b7fd4;
+  --deep: #052336;
+  --deep-2: #0a4a6b;
+  --red: #ff1f3d;
+  --red-2: #ff4257;
+
+  --font-jp: "Yu Gothic UI", "Yu Gothic", "Meiryo", "Noto Sans JP", "Microsoft YaHei UI", sans-serif;
+  --font-en: "Bahnschrift", "Arial Black", "Impact", "Segoe UI", sans-serif;
+  --font-num: "Bahnschrift", "Consolas", monospace;
+
+  --fall: 0;
+  --fan-origin-x: 34%;
+  --fan-radius: 560px;
+  --rot: 0deg;
+  --spread: 1;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--white);
+  color: var(--ink);
+  font-family: var(--font-jp);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+body { cursor: default; }
+a { color: inherit; text-decoration: none; }
+ul { margin: 0; padding: 0; list-style: none; }
+h1, h2, p { margin: 0; }
+:focus-visible { outline: 3px solid var(--red); outline-offset: 4px; }
+
+.defs-only { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* ============================================================
+   世界：白场 ⇄ 水下
+   ============================================================ */
+.world {
+  position: fixed; inset: 0; overflow: hidden;
+  isolation: isolate;
+  background: var(--white);
+}
+
+.water {
+  position: absolute; inset: 0;
+  /* --fall 驱动：纯白 → 青蓝水体 */
+  background:
+    radial-gradient(120% 80% at 30% -10%, #bff2ff 0%, rgba(191, 242, 255, 0) 55%),
+    linear-gradient(180deg, #0d5f8a 0%, var(--deep-2) 34%, var(--deep) 100%);
+  opacity: calc(var(--fall) * 1);
+  transition: opacity .6s ease;
+}
+
+/* 坠落：把 --fall 从 0 推到 1，前段缓慢后段加速，模拟入水 */
+body.is-falling .water {
+  animation: waterRise var(--fall-dur, 2400ms) cubic-bezier(.42, .02, .68, .55) forwards;
+}
+@keyframes waterRise {
+  from { --fall: 0; }
+  to   { --fall: 1; }
+}
+/* 浮出水面：慢速倒回 */
+body.is-surfacing .water {
+  animation: waterFall 900ms cubic-bezier(.3, .1, .6, .9) forwards;
+}
+@keyframes waterFall {
+  from { --fall: 1; }
+  to   { --fall: 0; }
+}
+.water-grain {
+  position: absolute; inset: -20%;
+  background:
+    radial-gradient(60% 40% at 20% 20%, rgba(255, 255, 255, .20), transparent 60%),
+    radial-gradient(50% 36% at 78% 66%, rgba(53, 211, 255, .26), transparent 62%);
+  mix-blend-mode: screen;
+  opacity: calc(.35 + var(--fall) * .5);
+  animation: grainDrift 22s ease-in-out infinite alternate;
+}
+@keyframes grainDrift {
+  from { transform: translate3d(-2%, -1%, 0) scale(1.02); }
+  to   { transform: translate3d(2%, 1.5%, 0) scale(1.08); }
+}
+
+/* 水面之上的强光带 */
+.sunbeams {
+  position: absolute; inset: -25%;
+  background: repeating-linear-gradient(102deg,
+    rgba(255, 255, 255, .55) 0px, rgba(255, 255, 255, .55) 3px,
+    rgba(255, 255, 255, 0) 3px, rgba(255, 255, 255, 0) 90px);
+  mix-blend-mode: screen;
+  opacity: calc(var(--fall) * .5);
+  filter: blur(2px);
+  animation: beamDrift 30s linear infinite;
+}
+@keyframes beamDrift {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-180px, 0, 0); }
+}
+
+/* ============================================================
+   折射层 + 焦散
+   ============================================================ */
+.refract {
+  position: absolute; inset: -6%;
+  /* 入场时不启用滤镜，避免白场出现脏边 */
+  filter: none;
+  transition: filter .3s linear;
+}
+body.is-underwater .refract { filter: url(#waterRefract); }
+
+.caustics-canvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  display: block;
+  mix-blend-mode: screen;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+  /* 小画布拉伸上来，天然的柔化 */
+  image-rendering: auto;
+  filter: blur(.8px) saturate(1.1);
+  transition: opacity .7s ease;
+}
+body.is-underwater .caustics-canvas { opacity: .62; }
+
+/* 水面波光：横向掠过 */
+.surface-sheen {
+  position: absolute; left: -30%; top: 0; width: 60%; height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .85), transparent);
+  mix-blend-mode: screen;
+  filter: blur(18px);
+  opacity: 0;
+  pointer-events: none;
+}
+.surface-sheen.is-pass { animation: sheenPass 1.5s cubic-bezier(.2, .7, .2, 1); }
+@keyframes sheenPass {
+  0%   { opacity: 0; transform: translateX(0) skewX(-12deg); }
+  22%  { opacity: .9; }
+  100% { opacity: 0; transform: translateX(260%) skewX(-12deg); }
+}
+
+/* ============================================================
+   角色挂载点（当前为空）
+   ------------------------------------------------------------
+   内置的 SVG 小人已移除。这里保留一个空的舞台容器，
+   接入真实 Cubism 模型时由 live2d.adapter 往里挂 canvas。
+   ============================================================ */
+.char-stage {
+  position: absolute;
+  left: 21%; top: 50%;
+  width: min(38vw, 520px);
+  aspect-ratio: 3 / 5;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: none;
+}
+.char-stage:empty { display: none; }
+.char-stage canvas { width: 100%; height: 100%; display: block; }
+
+/* ============================================================
+   入水冲击 / 气泡
+   ============================================================ */
+.flash {
+  position: fixed; inset: 0; z-index: 60;
+  background: radial-gradient(60% 60% at 30% 42%, #ffffff 0%, rgba(255, 255, 255, .85) 45%, rgba(255, 255, 255, 0) 100%);
+  opacity: 0; pointer-events: none;
+}
+.flash.is-on { animation: flashPop .42s ease-out; }
+@keyframes flashPop {
+  0% { opacity: 0; }
+  18% { opacity: var(--strength, .9); }
+  100% { opacity: 0; }
+}
+
+.splash-ring {
+  position: absolute; left: 26%; top: 52%;
+  width: 40vmax; height: 40vmax; margin: -20vmax 0 0 -20vmax;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, .85);
+  box-shadow: 0 0 60px rgba(180, 245, 255, .8), inset 0 0 80px rgba(255, 255, 255, .5);
+  animation: splashRing 1.3s cubic-bezier(.15, .7, .2, 1) forwards;
+  pointer-events: none;
+  z-index: 30;
+}
+@keyframes splashRing {
+  from { transform: scale(.05) rotate(0deg); opacity: 0; }
+  20%  { opacity: .95; }
+  to   { transform: scale(1.15) rotate(28deg); opacity: 0; }
+}
+
+.bubbles { position: absolute; inset: 0; pointer-events: none; z-index: 25; overflow: hidden; }
+.bubble {
+  position: absolute; left: var(--x); bottom: -6vh;
+  width: calc(var(--r) * 2); height: calc(var(--r) * 2);
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, .95), rgba(255, 255, 255, .18) 52%, rgba(190, 245, 255, .10) 72%);
+  border: 1px solid rgba(255, 255, 255, .5);
+  filter: blur(.3px);
+  animation: bubbleUp var(--dur) linear var(--delay) forwards;
+}
+@keyframes bubbleUp {
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(.5); opacity: 0; }
+  12%  { opacity: .95; }
+  100% { transform: translate3d(var(--drift), -118vh, 0) rotate(var(--wob)) scale(1); opacity: 0; }
+}
+
+/* 入水扩散环 */
+.dive-ripple {
+  position: absolute; left: 24%; top: 52%;
+  width: 20vmax; height: 20vmax; margin: -10vmax 0 0 -10vmax;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(53, 211, 255, .55) 0%, rgba(13, 95, 138, .35) 45%, rgba(255, 255, 255, 0) 72%);
+  animation: diveRipple 1.9s cubic-bezier(.1, .6, .2, 1) forwards;
+  pointer-events: none;
+  z-index: 40;
+}
+@keyframes diveRipple {
+  from { transform: scale(.02); opacity: 0; }
+  15%  { opacity: 1; }
+  to   { transform: scale(11); opacity: 0; }
+}
+
+/* ============================================================
+   入场页（纯白 + 细微波纹）
+   ============================================================ */
+.entry {
+  position: fixed; inset: 0; z-index: 50;
+  display: grid; place-items: center;
+  background: transparent;
+  transition: opacity .5s ease, filter .5s ease;
+}
+.entry.is-diving { opacity: 0; filter: blur(8px); pointer-events: none; }
+.entry-inner { text-align: center; transform: translateY(-4vh); }
+
+.entry-name {
+  font-family: var(--font-en);
+  font-size: clamp(38px, 7.6vw, 118px);
+  line-height: .94; letter-spacing: .04em;
+  color: var(--ink);
+  transform: skewX(-7deg);
+}
+.entry-tag {
+  margin-top: 10px;
+  font-size: clamp(11px, 1.15vw, 15px);
+  letter-spacing: .42em; color: var(--teal-2);
+  transform: skewX(-7deg);
+}
+
+/* 涟漪按钮：那"一点波纹" */
+.ripple-btn {
+  position: relative;
+  width: clamp(112px, 12vw, 168px);
+  height: clamp(112px, 12vw, 168px);
+  margin: clamp(26px, 5vh, 60px) auto 0;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  cursor: pointer;
+  transform: skewX(-7deg);
+}
+.rb-ring, .rb-core {
+  position: absolute; inset: 0; border-radius: 50%;
+}
+.rb-ring { border: 2px solid rgba(27, 127, 212, .55); animation: ringOut 4.2s cubic-bezier(.2, .6, .2, 1) infinite; }
+.rb-ring.d2 { animation-delay: 1.4s; border-color: rgba(53, 211, 255, .5); }
+.rb-ring.d3 { animation-delay: 2.8s; border-color: rgba(27, 127, 212, .35); }
+@keyframes ringOut {
+  0%   { transform: scale(.28); opacity: 0; }
+  18%  { opacity: .9; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+.rb-core {
+  inset: 30%;
+  background: radial-gradient(circle at 34% 30%, #ffffff, var(--cyan-2) 46%, var(--blue) 100%);
+  box-shadow: 0 10px 34px -8px rgba(27, 127, 212, .75);
+  animation: coreFloat 3.6s ease-in-out infinite alternate;
+}
+@keyframes coreFloat { from { transform: translateY(-3px) scale(1); } to { transform: translateY(3px) scale(1.05); } }
+.rb-text {
+  position: relative; z-index: 2;
+  font-family: var(--font-en); font-size: clamp(14px, 1.5vw, 20px);
+  letter-spacing: .3em; color: var(--ink);
+}
+.ripple-btn:hover .rb-core { animation-duration: 1.6s; }
+.ripple-btn:hover .rb-text { color: var(--red); }
+
+.entry-hint {
+  margin-top: clamp(18px, 3vh, 34px);
+  font-size: 12px; letter-spacing: .26em; color: var(--teal-2);
+  animation: hintPulse 2.6s ease-in-out infinite;
+}
+@keyframes hintPulse { 50% { opacity: .42; } }
+.entry-hint .k, .cmd-keys b {
+  display: inline-block; padding: 1px 7px; margin: 0 3px;
+  border: 1px solid currentColor; border-radius: 2px;
+  font-family: var(--font-num); font-size: .92em;
+}
+
+/* 入场时水面细纹 */
+body.is-entry .water::after,
+body.is-idle:not(.is-underwater) .water::after {
+  content: ""; position: absolute; inset: -10%;
+  background:
+    repeating-linear-gradient(96deg, rgba(27, 127, 212, .10) 0 2px, transparent 2px 64px),
+    repeating-linear-gradient(84deg, rgba(53, 211, 255, .08) 0 2px, transparent 2px 98px);
+  animation: fineRipple 26s linear infinite;
+}
+@keyframes fineRipple {
+  from { transform: translate3d(-2%, 0, 0) scale(1.04); }
+  to   { transform: translate3d(2%, 0, 0) scale(1.04); }
+}
+
+/* ============================================================
+   版权署名
+   ============================================================ */
+.credit {
+  position: absolute; left: clamp(18px, 3.2vw, 56px); bottom: clamp(18px, 3vh, 40px);
+  z-index: 20;
+  font-family: var(--font-num); font-size: 11px; letter-spacing: .18em;
+  color: var(--teal-2);
+  opacity: calc(.4 + var(--fall) * .6);
+}
+body.is-underwater .credit { color: rgba(190, 245, 255, .7); }
+
+/* ============================================================
+   扇形放射菜单
+   ============================================================ */
+.fan {
+  /* 原点由 JS 与 CSS 变量共同决定（角色移除后可由 --fan-origin-x 调整） */
+  position: absolute; left: var(--fan-origin-x, 40%); top: 50%;
+  /* 关键：把扇形原点定在容器中心，子项才能从中心沿弧线推出 */
+  transform: translate(-50%, -50%);
+  z-index: 15;
+}
+.fan-list { position: relative; }
+.fan-item {
+  position: absolute; left: 0; top: 0;
+  opacity: 0;
+  will-change: transform, opacity;
+  /* 落到弧线上：旋转 → 推出半径 → 转回水平 → 沿弧线微倾 */
+  transform:
+    rotate(calc(var(--angle) + var(--rot)))
+    translateX(calc(var(--fan-radius) * var(--spread)))
+    rotate(calc(-1 * (var(--angle) + var(--rot))))
+    rotate(var(--arc, 0deg))
+    translateY(-50%);
+}
+.fan-item.is-out { animation: fanOut 1.05s cubic-bezier(.16, .9, .18, 1) forwards; }
+@keyframes fanOut {
+  0% {
+    opacity: 0;
+    transform: rotate(-40deg) translateX(10px) rotate(40deg) rotate(var(--arc, 0deg)) translateY(-50%) scale(.62);
+  }
+  55% { opacity: 1; }
+  78% {
+    opacity: 1;
+    transform:
+      rotate(calc((var(--angle) + var(--rot)) * 1.06))
+      translateX(calc(var(--fan-radius) * var(--spread) * 1.05))
+      rotate(calc(-1 * (var(--angle) + var(--rot)) * 1.06))
+      rotate(var(--arc, 0deg))
+      translateY(-50%)
+      scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform:
+      rotate(calc(var(--angle) + var(--rot)))
+      translateX(calc(var(--fan-radius) * var(--spread)))
+      rotate(calc(-1 * (var(--angle) + var(--rot))))
+      rotate(var(--arc, 0deg))
+      translateY(-50%);
+  }
+}
+
+.fan-link {
+  position: relative;
+  display: block;
+  padding: .06em .5em .1em .38em;
+  font-family: var(--font-en);
+  font-size: calc(clamp(28px, 3.2vw, 52px) * var(--font-scale, 1));
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: .01em;
+  line-height: 1.02;
+  white-space: nowrap;
+  color: var(--teal);
+  transform-origin: 4% 50%;
+  /* 叠印式偏移：红 → 青 → 白，深色底字 + 亮色叠印 = 参考图的分色观感 */
+  text-shadow:
+    .02em .03em 0 var(--red),
+    .066em .082em 0 var(--cyan),
+    .098em .12em 0 rgba(255, 255, 255, .92);
+  transition: color .22s ease, transform .3s cubic-bezier(.2, 1.3, .4, 1), text-shadow .22s ease;
+}
+.fan-link .fi-jp {
+  display: none;
+  font-family: var(--font-jp);
+  font-style: normal;
+  font-size: .42em;
+  letter-spacing: .18em;
+  margin-left: .4em;
+  vertical-align: .42em;
+  opacity: .85;
+}
+.fan-item.is-active .fan-link {
+  color: var(--ink);
+  transform: translateX(-.1em) scale(1.06);
+  text-shadow:
+    .02em .03em 0 var(--cyan),
+    .066em .082em 0 var(--white),
+    .098em .12em 0 rgba(11, 52, 70, .9);
+}
+.fan-item.is-active .fan-link::before {
+  content: "";
+  position: absolute; left: -.14em; top: .12em; bottom: .06em; width: .1em;
+  background: var(--red);
+  transform: skewX(-14deg);
+  box-shadow: .1em 0 0 rgba(7, 21, 35, .9);
+}
+.fan-item.is-active .fan-link .fi-jp { display: inline-block; }
+.fan-link.is-pulse { animation: linkPulse .42s cubic-bezier(.2, 1.4, .4, 1); }
+@keyframes linkPulse {
+  0% { transform: translateX(-.1em) scale(1.06); }
+  40% { transform: translateX(.06em) scale(1.14); }
+  100% { transform: translateX(-.1em) scale(1.06); }
+}
+
+/* 水下配色：非选中项变浅，选中项更亮 */
+body.is-underwater .fan-link {
+  color: rgba(226, 250, 255, .9);
+  text-shadow:
+    .02em .03em 0 rgba(255, 31, 61, .95),
+    .066em .082em 0 rgba(53, 211, 255, .9),
+    .098em .12em 0 rgba(3, 22, 34, .95);
+}
+body.is-underwater .fan-item.is-active .fan-link {
+  color: var(--white);
+  text-shadow:
+    .02em .03em 0 var(--red),
+    .066em .082em 0 rgba(53, 211, 255, .95),
+    .098em .12em 0 rgba(2, 14, 22, .95);
+}
+
+/* ============================================================
+   底部命令条
+   ============================================================ */
+.cmdbar {
+  position: absolute; right: clamp(18px, 3.2vw, 56px); bottom: clamp(18px, 3.4vh, 44px);
+  z-index: 20;
+  display: flex; align-items: flex-end; gap: clamp(16px, 2.4vw, 40px);
+  text-align: right;
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity .6s ease, transform .6s cubic-bezier(.2, .9, .2, 1);
+}
+body.is-settled .cmdbar { opacity: 1; transform: none; }
+.cmd-label { display: grid; gap: 2px; }
+.cmd-jp { font-size: clamp(15px, 1.7vw, 24px); font-weight: 700; letter-spacing: .1em; }
+.cmd-en { font-family: var(--font-en); font-size: 11px; letter-spacing: .32em; color: var(--red); }
+.cmd-keys { display: flex; gap: 14px; font-size: 12px; letter-spacing: .16em; }
+.cmd-keys b { color: var(--red); border-color: var(--red); }
+body.is-underwater .cmd-jp { color: var(--paper); }
+body.is-underwater .credit { opacity: .8; }
+
+/* 窄屏：扇形改纵向堆叠，弧线错位保留放射的影子 */
+.fan.is-stacked {
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 92vw;
+}
+.fan.is-stacked .fan-list {
+  display: flex; flex-direction: column; align-items: center;
+  gap: clamp(2px, .6vh, 8px);
+}
+.fan.is-stacked .fan-item {
+  position: relative;
+  opacity: 1;
+  transform: none;
+  animation: none;
+}
+.fan.is-stacked .fan-item.is-out { animation: none; opacity: 1; }
+.fan.is-stacked .fan-link {
+  font-size: clamp(26px, 7.6vw, 44px);
+  padding-left: .3em;
+}
+/* 保留一点放射性：按序号做水平错位与轻微旋转 */
+.fan.is-stacked .fan-item:nth-child(1) .fan-link { transform: translateX(-26px) rotate(-3deg); }
+.fan.is-stacked .fan-item:nth-child(2) .fan-link { transform: translateX(-17px) rotate(-2deg); }
+.fan.is-stacked .fan-item:nth-child(3) .fan-link { transform: translateX(-9px)  rotate(-1deg); }
+.fan.is-stacked .fan-item:nth-child(4) .fan-link { transform: none; }
+.fan.is-stacked .fan-item:nth-child(5) .fan-link { transform: translateX(9px)   rotate(1deg); }
+.fan.is-stacked .fan-item:nth-child(6) .fan-link { transform: translateX(17px)  rotate(2deg); }
+.fan.is-stacked .fan-item:nth-child(7) .fan-link { transform: translateX(26px)  rotate(3deg); }
+.fan.is-stacked .fan-item.is-active .fan-link { transform: translateX(0) scale(1.08); }
+.fan.is-stacked .fan-item.is-active .fan-link.is-pulse { animation: linkPulseStack .42s cubic-bezier(.2, 1.4, .4, 1); }
+@keyframes linkPulseStack {
+  0% { transform: translateX(0) scale(1.08); }
+  40% { transform: translateX(0) scale(1.16); }
+  100% { transform: translateX(0) scale(1.08); }
+}
+
+/* ============================================================
+   响应式
+   ------------------------------------------------------------
+   角色已移除，扇形原点可以更自由地横向铺开。
+   ============================================================ */
+@media (max-width: 1100px) {
+  :root { --fan-origin-x: 38%; }
+  .fan-link { font-size: clamp(26px, 3.6vw, 46px); }
+}
+@media (max-width: 900px) {
+  :root { --fan-origin-x: 36%; }
+  .entry-inner { transform: translateY(-2vh); }
+}
+@media (max-width: 620px) {
+  .credit { display: none; }
+  .cmdbar { left: 18px; right: 18px; justify-content: space-between; }
+  .entry-name { letter-spacing: .01em; }
+}
+
+/* 尊重"减少动态效果" */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .12s !important;
+  }
+}

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ENTER — 个人站</title>
+<meta name="description" content="个人博客入口。坠入水中。">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="is-entry">
+
+<!-- ============================================================
+     折射滤镜：整个"水下"世界被它扭曲，模拟水体折射
+     ============================================================ -->
+<svg class="defs-only" aria-hidden="true" focusable="false">
+  <filter id="waterRefract" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
+    <feTurbulence id="refractTurb" type="fractalNoise" baseFrequency="0.0016 0.009"
+                  numOctaves="2" seed="7" result="noise"/>
+    <feDisplacementMap id="refractDisp" in="SourceGraphic" in2="noise" scale="0"
+                       xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</svg>
+
+<!-- ============================================================
+     世界：白场 → 水面 → 水下
+     ============================================================ -->
+<div class="world" id="world">
+
+  <!-- 水色背景。入场为纯白，坠落时反相为青蓝 -->
+  <div class="water" id="water" aria-hidden="true">
+    <div class="water-grain"></div>
+  </div>
+
+  <!-- 水面之上的强光带（阳光射入水面） -->
+  <div class="sunbeams" id="sunbeams" aria-hidden="true"></div>
+
+  <!-- 折射层：焦散与（可选的）角色挂载点都在这一层里被扭曲 -->
+  <div class="refract" id="refract">
+    <canvas class="caustics-canvas" id="caustics" aria-hidden="true"></canvas>
+
+    <!-- ============================================================
+         角色挂载点（当前为空）
+         ------------------------------------------------------------
+         要用真实 Cubism 模型时，把 canvas 放进这里并实现
+         data.js 里的 live2d.adapter.load()，挂载器默认用它作为舞台。
+         ============================================================ -->
+    <div class="char-stage" id="charStage"></div>
+  </div>
+
+  <!-- 气泡层（坠落时上升） -->
+  <div class="bubbles" id="bubbles" aria-hidden="true"></div>
+
+  <!-- 水面波光（横向掠过的光带） -->
+  <div class="surface-sheen" id="sheen" aria-hidden="true"></div>
+
+  <!-- ============================================================
+       扇形放射菜单
+       ============================================================ -->
+  <nav class="fan" id="fan" aria-label="站点导航">
+    <ul class="fan-list" id="fanList"></ul>
+  </nav>
+
+  <!-- 底部命令提示 -->
+  <footer class="cmdbar" id="cmdbar">
+    <div class="cmd-label">
+      <span class="cmd-jp" id="cmdJp">メニュー</span>
+      <span class="cmd-en" id="cmdEn">Command</span>
+    </div>
+    <div class="cmd-keys">
+      <span class="ck"><b>ENTER</b>決定</span>
+      <span class="ck"><b>ESC</b>閉じる</span>
+    </div>
+  </footer>
+
+  <!-- 左下角署名 -->
+  <div class="credit" id="credit"></div>
+</div>
+
+<!-- ============================================================
+     入场提示（纯白页面上的那一点涟漪）
+     ============================================================ -->
+<div class="entry" id="entry">
+  <div class="entry-inner">
+    <div class="entry-name">YOUR&nbsp;NAME</div>
+    <p class="entry-tag">PERSONAL&nbsp;SITE&nbsp;/&nbsp;落水而入</p>
+    <div class="ripple-btn" id="rippleBtn" role="button" tabindex="0" aria-label="进入站点">
+      <span class="rb-ring"></span>
+      <span class="rb-ring d2"></span>
+      <span class="rb-ring d3"></span>
+      <span class="rb-core"></span>
+      <span class="rb-text">ENTER</span>
+    </div>
+    <p class="entry-hint"><span class="k">ENTER</span> 或 <span class="k">滚轮下滑</span> 入水</p>
+  </div>
+</div>
+
+<!-- 坠落时的白闪 / 入水冲击 -->
+<div class="flash" id="flash" aria-hidden="true"></div>
+
+<script src="js/data.js" defer></script>
+<script src="js/character.js" defer></script>
+<script src="js/water.js" defer></script>
+<script src="js/menu.js" defer></script>
+<script src="js/boot.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PERSONA 3 — MAIN MENU</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="is-booting">
+
+<!-- ============ 背景：时间轴 / 波浪 / 斜切碎片 ============ -->
+<div class="bg" aria-hidden="true">
+  <div class="bg-base"></div>
+  <div class="bg-rays"></div>
+  <svg class="bg-wave wave-a" viewBox="0 0 1600 900" preserveAspectRatio="none">
+    <path class="w w1" d="M-200,520 C180,420 360,640 720,540 C1080,440 1300,660 1800,500"></path>
+    <path class="w w2" d="M-200,600 C200,500 420,700 760,600 C1120,494 1340,720 1800,570"></path>
+    <path class="w w3" d="M-200,680 C220,580 460,760 800,660 C1160,554 1380,780 1800,640"></path>
+  </svg>
+  <svg class="bg-wave wave-b" viewBox="0 0 1600 900" preserveAspectRatio="none">
+    <path class="w w1" d="M-200,300 C200,200 460,420 820,320 C1180,220 1380,440 1800,300"></path>
+    <path class="w w2" d="M-200,180 C180,90 440,300 780,210 C1140,116 1360,340 1800,190"></path>
+  </svg>
+  <div class="shards">
+    <i class="shard s1"></i><i class="shard s2"></i><i class="shard s3"></i>
+    <i class="shard s4"></i><i class="shard s5"></i><i class="shard s6"></i>
+    <i class="shard s7"></i><i class="shard s8"></i>
+  </div>
+  <div class="grain"></div>
+  <div class="scanline"></div>
+</div>
+
+<!-- ============ 启动动画 ============ -->
+<div class="boot" id="boot" aria-hidden="true">
+  <div class="boot-inner">
+    <div class="boot-kana" id="bootKana">ペルソナ</div>
+    <div class="boot-line"><span></span></div>
+    <div class="boot-en">PERSONA 3</div>
+    <div class="boot-sub">DARK HOUR NAVIGATION SYSTEM</div>
+    <div class="boot-tip">按 <b>M</b> 开启音效 ／ PRESS M FOR SOUND</div>
+  </div>
+  <div class="boot-percent" id="bootPct">00</div>
+</div>
+
+<!-- ============ 标题界面 ============ -->
+<section class="screen screen-title is-active" id="screen-title" data-screen="title">
+  <div class="title-wrap">
+    <p class="title-kicker">ATLUS · PERSONA 3 RELOAD STYLE UI</p>
+    <h1 class="title-logo">
+      <span class="logo-line1">PERSONA</span>
+      <span class="logo-line2">3</span>
+    </h1>
+    <p class="title-jp">ペルソナ スリー</p>
+    <p class="title-note">影時間 ／ ダークアワー メニュー システム</p>
+  </div>
+  <div class="title-hint">
+    <span class="key">ENTER</span><span class="dot">·</span>PRESS START
+  </div>
+  <p class="title-sfx">音效默认关闭 — 按 <b>M</b> 开启</p>
+  <div class="title-foot">
+    <span id="titleClock">--:--:--</span>
+    <span class="sep">/</span>
+    <span>PHASE: DARK HOUR</span>
+  </div>
+</section>
+
+<!-- ============ 主菜单 ============ -->
+<section class="screen screen-menu" id="screen-menu" data-screen="menu" aria-hidden="true">
+  <header class="hud">
+    <div class="hud-left">
+      <span class="hud-mark">P3</span>
+      <span class="hud-label">MAIN MENU</span>
+    </div>
+    <div class="hud-right">
+      <span class="hud-clock" id="hudClock">--:--:--</span>
+      <button class="hud-sound" id="soundToggle" type="button" aria-pressed="false">
+        <span class="snd-on">SFX ON</span><span class="snd-off">SFX OFF</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="vertical-label" aria-hidden="true">MAIN&nbsp;&nbsp;MENU</div>
+
+  <nav class="nav" id="mainNav" aria-label="主菜单">
+    <button class="nav-item" data-target="status" type="button">
+      <span class="nav-idx">01</span>
+      <span class="nav-body">
+        <span class="nav-jp">ステータス</span>
+        <span class="nav-en">STATUS</span>
+      </span>
+      <span class="nav-arrow">›</span>
+    </button>
+    <button class="nav-item" data-target="persona" type="button">
+      <span class="nav-idx">02</span>
+      <span class="nav-body">
+        <span class="nav-jp">ペルソナ</span>
+        <span class="nav-en">PERSONA</span>
+      </span>
+      <span class="nav-arrow">›</span>
+    </button>
+    <button class="nav-item" data-target="items" type="button">
+      <span class="nav-idx">03</span>
+      <span class="nav-body">
+        <span class="nav-jp">アイテム</span>
+        <span class="nav-en">ITEMS</span>
+      </span>
+      <span class="nav-arrow">›</span>
+    </button>
+    <button class="nav-item" data-target="equip" type="button">
+      <span class="nav-idx">04</span>
+      <span class="nav-body">
+        <span class="nav-jp">そうび</span>
+        <span class="nav-en">EQUIPMENT</span>
+      </span>
+      <span class="nav-arrow">›</span>
+    </button>
+    <button class="nav-item" data-target="quest" type="button">
+      <span class="nav-idx">05</span>
+      <span class="nav-body">
+        <span class="nav-jp">クエスト</span>
+        <span class="nav-en">QUESTS</span>
+      </span>
+      <span class="nav-arrow">›</span>
+    </button>
+    <button class="nav-item" data-target="social" type="button">
+      <span class="nav-idx">06</span>
+      <span class="nav-body">
+        <span class="nav-jp">コミュ</span>
+        <span class="nav-en">SOCIAL LINK</span>
+      </span>
+      <span class="nav-arrow">›</span>
+    </button>
+    <button class="nav-item" data-target="system" type="button">
+      <span class="nav-idx">07</span>
+      <span class="nav-body">
+        <span class="nav-jp">システム</span>
+        <span class="nav-en">SYSTEM</span>
+      </span>
+      <span class="nav-arrow">›</span>
+    </button>
+  </nav>
+
+  <aside class="hud-info" id="navInfo">
+    <div class="info-kana" id="infoKana">ステータス</div>
+    <div class="info-title" id="infoTitle">STATUS</div>
+    <p class="info-desc" id="infoDesc">确认身体能力与装备。检查你的战斗准备。</p>
+  </aside>
+
+  <footer class="hint">
+    <span class="key">↑</span><span class="key">↓</span><span class="hint-t">选择</span>
+    <span class="key">ENTER</span><span class="hint-t">决定</span>
+    <span class="key">ESC</span><span class="hint-t">返回</span>
+    <span class="key">M</span><span class="hint-t">音效</span>
+  </footer>
+</section>
+
+<!-- ============ 状态界面 ============ -->
+<section class="screen screen-status" id="screen-status" data-screen="status" aria-hidden="true">
+  <header class="hud">
+    <div class="hud-left">
+      <span class="hud-mark">P3</span>
+      <span class="hud-label">STATUS</span>
+    </div>
+    <div class="hud-right">
+      <span class="hud-clock js-clock">--:--:--</span>
+      <span class="hud-page">01 / 07</span>
+    </div>
+  </header>
+  <div class="vertical-label" aria-hidden="true">STATUS</div>
+
+  <div class="status-grid">
+    <div class="portrait">
+      <div class="portrait-frame">
+        <svg viewBox="0 0 240 300" class="portrait-svg" aria-hidden="true">
+          <defs>
+            <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#0b1a3a"/><stop offset="1" stop-color="#02060f"/>
+            </linearGradient>
+          </defs>
+          <rect width="240" height="300" fill="url(#pg)"/>
+          <g class="portrait-shape">
+            <polygon points="120,40 190,110 120,180 50,110" fill="none" stroke="#4de8ff" stroke-width="2" opacity=".85"/>
+            <polygon points="120,70 165,110 120,150 75,110" fill="none" stroke="#ffffff" stroke-width="1.4" opacity=".5"/>
+            <circle cx="120" cy="110" r="8" fill="#4de8ff"/>
+            <path d="M20 250 L120 190 L220 250" fill="none" stroke="#2a6bd8" stroke-width="2"/>
+            <path d="M-10 285 L120 210 L250 285" fill="none" stroke="#123a7a" stroke-width="3"/>
+          </g>
+        </svg>
+        <div class="portrait-slash"></div>
+      </div>
+      <div class="portrait-name">
+        <span class="pn-jp">主人公</span>
+        <span class="pn-en">PROTAGONIST</span>
+      </div>
+      <div class="portrait-meta">
+        <span>LV. <b id="pLevel">12</b></span><span>·</span>
+        <span>HP <b id="pHpTop">248</b>/248</span><span>·</span>
+        <span>SP <b id="pSpTop">96</b>/180</span>
+      </div>
+    </div>
+
+    <div class="panels">
+      <div class="panel panel-vitals">
+        <h2 class="panel-title"><span class="pt-en">VITALS</span><span class="pt-jp">コンディション</span></h2>
+        <div class="vital" data-bar>
+          <div class="vital-head"><span class="v-name">HP</span><span class="v-val"><b data-val="248">0</b> / 248</span></div>
+          <div class="bar"><span class="bar-fill hp" data-w="248" data-max="248" style="--pct:0%"></span></div>
+        </div>
+        <div class="vital" data-bar>
+          <div class="vital-head"><span class="v-name">SP</span><span class="v-val"><b data-val="96">0</b> / 180</span></div>
+          <div class="bar"><span class="bar-fill sp" data-w="96" data-max="180" style="--pct:0%"></span></div>
+        </div>
+        <div class="vital" data-bar>
+          <div class="vital-head"><span class="v-name">EXP</span><span class="v-val"><b data-val="6420">0</b> / 9800</span></div>
+          <div class="bar"><span class="bar-fill exp" data-w="6420" data-max="9800" style="--pct:0%"></span></div>
+        </div>
+        <div class="vital-tags">
+          <span class="tag">状態: 良好</span>
+          <span class="tag">天気: 晴れ</span>
+          <span class="tag">時間帯: 影時間</span>
+        </div>
+      </div>
+
+      <div class="panel panel-stats">
+        <h2 class="panel-title"><span class="pt-en">PARAMETERS</span><span class="pt-jp">基礎能力</span></h2>        <ul class="stat-list" id="statList">
+          <li class="stat" data-stat="力" data-val="14"><span class="st-en">STRENGTH</span><span class="st-jp">力</span><span class="st-num">0</span></li>
+          <li class="stat" data-stat="魔" data-val="21"><span class="st-en">MAGIC</span><span class="st-jp">魔</span><span class="st-num">0</span></li>
+          <li class="stat" data-stat="耐" data-val="12"><span class="st-en">ENDURANCE</span><span class="st-jp">耐</span><span class="st-num">0</span></li>
+          <li class="stat" data-stat="速" data-val="18"><span class="st-en">AGILITY</span><span class="st-jp">速</span><span class="st-num">0</span></li>
+          <li class="stat" data-stat="運" data-val="9"><span class="st-en">LUCK</span><span class="st-jp">運</span><span class="st-num">0</span></li>
+        </ul>
+      </div>
+
+      <div class="panel panel-equip">
+        <h2 class="panel-title"><span class="pt-en">EQUIPMENT</span><span class="pt-jp">そうび</span></h2>
+        <ul class="equip-list" id="equipList">
+          <li><span class="eq-slot">武器</span><span class="eq-name">古の剣</span><span class="eq-val">ATK 86</span></li>
+          <li><span class="eq-slot">防具</span><span class="eq-name">学生服</span><span class="eq-val">DEF 42</span></li>
+          <li><span class="eq-slot">靴</span><span class="eq-name">革のブーツ</span><span class="eq-val">DEF 12</span></li>
+          <li><span class="eq-slot">装飾</span><span class="eq-name">なし</span><span class="eq-val">—</span></li>
+        </ul>
+      </div>
+
+      <div class="panel panel-social">
+        <h2 class="panel-title"><span class="pt-en">SOCIAL LINK</span><span class="pt-jp">コミュニティ</span></h2>
+        <ul class="link-list" id="linkList">
+          <li class="link"><span class="lk-arcana">愚者</span><span class="lk-name">特別課外活動部</span><span class="lk-rank">RANK 3</span></li>
+          <li class="link"><span class="lk-arcana">魔術師</span><span class="lk-name">友近 健二</span><span class="lk-rank">RANK 2</span></li>
+          <li class="link"><span class="lk-arcana">女教皇</span><span class="lk-name">山岸 風花</span><span class="lk-rank">RANK 1</span></li>
+          <li class="link"><span class="lk-arcana">皇帝</span><span class="lk-name">学生会</span><span class="lk-rank">RANK 2</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <footer class="hint">
+    <span class="key">ESC</span><span class="hint-t">返回主菜单</span>
+    <span class="key">←</span><span class="key">→</span><span class="hint-t">切换界面</span>
+  </footer>
+</section>
+
+<!-- ============ 人格面具界面 ============ -->
+<section class="screen screen-persona" id="screen-persona" data-screen="persona" aria-hidden="true">
+  <header class="hud">
+    <div class="hud-left">
+      <span class="hud-mark">P3</span>
+      <span class="hud-label">PERSONA</span>
+    </div>
+    <div class="hud-right">
+      <span class="hud-clock js-clock">--:--:--</span>
+      <span class="hud-page">02 / 07</span>
+    </div>
+  </header>
+  <div class="vertical-label" aria-hidden="true">PERSONA</div>
+
+  <div class="persona-grid">
+    <ul class="persona-list" id="personaList" role="tablist" aria-label="人格面具列表"></ul>
+
+    <div class="persona-detail" id="personaDetail">
+      <div class="pd-head">
+        <span class="pd-arcana-no" id="pdNo">0</span>
+        <div class="pd-names">
+          <span class="pd-name-jp" id="pdNameJp">オルフェウス</span>
+          <span class="pd-name-en" id="pdNameEn">ORPHEUS</span>
+        </div>
+        <span class="pd-arcana" id="pdArcana">愚者 · FOOL</span>
+      </div>
+
+      <div class="pd-figure">
+        <svg viewBox="0 0 320 320" id="pdFigure" aria-hidden="true">
+          <defs>
+            <radialGradient id="fgGlow" cx="50%" cy="45%" r="55%">
+              <stop offset="0" stop-color="#4de8ff" stop-opacity=".55"/>
+              <stop offset="1" stop-color="#4de8ff" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <circle cx="160" cy="150" r="130" fill="url(#fgGlow)"/>
+          <g id="pdFigureShape" class="pd-figure-shape">
+            <path d="M160 60 L235 150 L160 240 L85 150 Z" fill="none" stroke="#4de8ff" stroke-width="2.4"/>
+            <path d="M160 92 L206 150 L160 208 L114 150 Z" fill="none" stroke="#ffffff" stroke-width="1.4" opacity=".7"/>
+            <circle cx="160" cy="150" r="14" fill="#0a1c3c" stroke="#4de8ff" stroke-width="2"/>
+            <path d="M60 280 L160 232 L260 280" fill="none" stroke="#2a6bd8" stroke-width="2.4"/>
+          </g>
+        </svg>
+        <div class="pd-level">
+          <span class="pdl-label">LV</span><span class="pdl-num" id="pdLevel">3</span>
+        </div>
+      </div>
+
+      <div class="pd-stats" id="pdStats"></div>
+
+      <div class="pd-affinity">
+        <span class="aff-title">属性耐性 / AFFINITY</span>
+        <div class="aff-grid" id="pdAffinity"></div>
+      </div>
+
+      <div class="pd-moves">
+        <span class="aff-title">習得スキル / SKILLS</span>
+        <ul class="move-list" id="pdMoves"></ul>
+      </div>
+    </div>
+  </div>
+
+  <footer class="hint">
+    <span class="key">↑</span><span class="key">↓</span><span class="hint-t">选择面具</span>
+    <span class="key">ESC</span><span class="hint-t">返回主菜单</span>
+  </footer>
+</section>
+
+<!-- ============ 未实装界面的占位 ============ -->
+<section class="screen screen-placeholder" id="screen-placeholder" data-screen="placeholder" aria-hidden="true">
+  <header class="hud">
+    <div class="hud-left">
+      <span class="hud-mark">P3</span>
+      <span class="hud-label" id="phLabel">ITEMS</span>
+    </div>
+    <div class="hud-right"><span class="hud-clock js-clock">--:--:--</span></div>
+  </header>
+  <div class="placeholder-body">
+    <div class="ph-jp" id="phJp">アイテム</div>
+    <div class="ph-en" id="phEn">ITEMS</div>
+    <div class="ph-slash"></div>
+    <p class="ph-desc" id="phDesc">この画面はまだ実装されていません。</p>
+    <button class="ph-back" id="phBack" type="button"><span class="key">ESC</span> 返回主菜单</button>
+  </div>
+</section>
+
+<!-- ============ 底部键位提示（全局） ============ -->
+<div class="veil" id="veil" aria-hidden="true"></div>
+
+<script src="js/game.js" defer></script>
+</body>
+</html>
