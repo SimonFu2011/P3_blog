@@ -82,8 +82,17 @@ h1, h2, p { margin: 0; }
   transition: opacity .6s ease;
 }
 
+/* ============================================================
+   水位动画挂在 body 上 —— 不要挂回 .water
+   ------------------------------------------------------------
+   --fall 是可继承属性，而动画只作用在"被动画的那个元素"上：
+   挂在 .water 上时只有 .water 的后代拿得到插值，兄弟节点拿不到。
+   .sunbeams（阳光带）和 .credit 都是 .water 的兄弟，于是它们永远读到
+   :root 里的 0 —— 阳光带 opacity 恒为 0，从来没出现过。
+   挂在 body 上，整棵子树（水体 / 阳光带 / 署名）才同步。
+   ============================================================ */
 /* 坠落：把 --fall 从 0 推到 1，前段缓慢后段加速，模拟入水 */
-body.is-falling .water {
+body.is-falling {
   animation: waterRise var(--fall-dur, 2400ms) cubic-bezier(.42, .02, .68, .55) forwards;
 }
 @keyframes waterRise {
@@ -91,13 +100,19 @@ body.is-falling .water {
   to   { --fall: 1; }
 }
 /* 浮出水面：慢速倒回 */
-body.is-surfacing .water {
+body.is-surfacing {
   animation: waterFall 900ms cubic-bezier(.3, .1, .6, .9) forwards;
 }
 @keyframes waterFall {
   from { --fall: 1; }
   to   { --fall: 0; }
 }
+
+/* 终态必须自己声明 --fall:1。
+   is-falling 一旦被移除，动画连同它的 forwards 填充值一起失效，--fall 会
+   退回 :root 的 0 —— 水体与阳光带整个淡掉，只剩白底配浅色菜单（读不清）。
+   这条声明补上的就是这个断点。 */
+body.is-underwater { --fall: 1; }
 .water-grain {
   position: absolute; inset: -20%;
   background:
@@ -133,11 +148,21 @@ body.is-surfacing .water {
    ============================================================ */
 .refract {
   position: absolute; inset: -6%;
-  /* 入场时不启用滤镜，避免白场出现脏边 */
-  filter: none;
-  transition: filter .3s linear;
+  /* ------------------------------------------------------------
+     这里原本是 body.is-underwater .refract { filter: url(#waterRefract) }，
+     但那个 feDisplacementMap 的 scale 恒为 0：位移量为零 = 纯 no-op，
+     代价却是每帧对整屏（本层还外扩 6%，滤镜区域再放大到 130%）重算一次
+     feTurbulence(numOctaves=2) + feDisplacementMap —— 而层里的焦散每帧
+     都在变，所以这笔开销每帧都在付。已移除。
+     想要真正的水体折射，见 index.html 里 #waterRefract 的说明与成本提示。
+
+     isolation: isolate 必须保留：滤镜会给 .refract 建立独立混合组，
+     .caustics-canvas 的 mix-blend-mode: screen 原本只在这一组内混合。
+     直接删掉滤镜会改变焦散的合成结果，isolate 把原有观感保持不变。
+     （若想让焦散真的和海水做 screen 混色、更"发光"，删掉这行即可。）
+     ------------------------------------------------------------ */
+  isolation: isolate;
 }
-body.is-underwater .refract { filter: url(#waterRefract); }
 
 .caustics-canvas {
   position: absolute; inset: 0;
@@ -361,7 +386,12 @@ body.is-underwater .credit { color: rgba(190, 245, 255, .7); }
   /* 关键：把扇形原点定在容器中心，子项才能从中心沿弧线推出 */
   transform: translate(-50%, -50%);
   z-index: 15;
+  /* 未展开时整块不可命中：.fan-item 只是 opacity:0，它仍然能被鼠标点到、
+     也能被 Tab 聚焦，白场上就会冒出一批"看不见但按得动"的链接。
+     JS 侧再配一份 inert（连读屏一起屏蔽）。 */
+  pointer-events: none;
 }
+.fan.is-open { pointer-events: auto; }
 .fan-list { position: relative; }
 .fan-item {
   position: absolute; left: 0; top: 0;
@@ -400,6 +430,26 @@ body.is-underwater .credit { color: rgba(190, 245, 255, .7); }
       rotate(calc(-1 * (var(--angle) + var(--rot))))
       rotate(var(--arc, 0deg))
       translateY(-50%);
+  }
+}
+
+/* 收起：fanOut 的逆过程，0% 必须与 fanOut 的 100% 逐字一致，否则会跳一下。
+   注意 .fan-item.is-in 必须写在 .fan-item.is-out 之后：两者同优先级，
+   靠后的 animation 会整体覆盖前者 —— 收起与展开的动画因此不会打架。 */
+.fan-item.is-in { animation: fanIn .5s cubic-bezier(.5, 0, .75, .2) forwards; }
+@keyframes fanIn {
+  0% {
+    opacity: 1;
+    transform:
+      rotate(calc(var(--angle) + var(--rot)))
+      translateX(calc(var(--fan-radius) * var(--spread)))
+      rotate(calc(-1 * (var(--angle) + var(--rot))))
+      rotate(var(--arc, 0deg))
+      translateY(-50%);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(-40deg) translateX(10px) rotate(40deg) rotate(var(--arc, 0deg)) translateY(-50%) scale(.62);
   }
 }
 
@@ -505,11 +555,14 @@ body.is-underwater .credit { opacity: .8; }
 }
 .fan.is-stacked .fan-item {
   position: relative;
-  opacity: 1;
+  /* 默认也是收起的：is-stacked 原本无条件 opacity:1，会在窄屏的入场白场上
+     把深色粗体菜单直接透在 entry 覆盖层后面（.entry 背景是透明的） */
+  opacity: 0;
   transform: none;
   animation: none;
 }
 .fan.is-stacked .fan-item.is-out { animation: none; opacity: 1; }
+.fan.is-stacked .fan-item.is-in { animation: none; opacity: 0; }
 .fan.is-stacked .fan-link {
   font-size: clamp(26px, 7.6vw, 44px);
   padding-left: .3em;

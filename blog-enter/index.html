@@ -10,13 +10,24 @@
 <body class="is-entry">
 
 <!-- ============================================================
-     折射滤镜：整个"水下"世界被它扭曲，模拟水体折射
+     折射滤镜（当前未被启用）
+     ------------------------------------------------------------
+     这是真正的水体折射：feTurbulence 生成噪声，feDisplacementMap 用它把
+     整个"水下"世界扭一下。此前它被 body.is-underwater 无条件开启，但
+     scale 一直是 0 —— 位移量为零 = 视觉上纯 no-op，代价却是每帧对整屏
+     （还外扩 6%、滤镜区域再放大到 130%）重算一次湍流，而层里的焦散每帧
+     都在变，所以这笔开销每帧都在付。已从 CSS 中移除。
+
+     想启用：给 .refract 加 filter: url(#waterRefract)。
+     成本提醒：feTurbulence 是逐像素噪声，1080p 下每帧都要重算，建议只在
+     入水冲击这类短瞬间用（例如挂在 body.is-falling 上），别无脑常开。
+     scale 是位移像素数，6~10 比较自然。
      ============================================================ -->
 <svg class="defs-only" aria-hidden="true" focusable="false">
   <filter id="waterRefract" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
     <feTurbulence id="refractTurb" type="fractalNoise" baseFrequency="0.0016 0.009"
                   numOctaves="2" seed="7" result="noise"/>
-    <feDisplacementMap id="refractDisp" in="SourceGraphic" in2="noise" scale="0"
+    <feDisplacementMap id="refractDisp" in="SourceGraphic" in2="noise" scale="8"
                        xChannelSelector="R" yChannelSelector="G"/>
   </filter>
 </svg>

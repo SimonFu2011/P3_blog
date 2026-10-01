@@ -223,8 +223,8 @@
         }
         if (p >= 1) this.finish();
       }
-      /* 焦散重绘由水位驱动（CSS 变量会同步更新，这里直接读状态） */
-      Water.update(dt, this.state === 'entry' ? 0 : 1);
+      /* 焦散重绘：入场白场上不需要它 */
+      if (this.state !== 'entry') Water.update(dt);
     },
 
     /* 仅供自动化验证使用：用虚拟时钟推进，避免依赖 rAF 与真实时间 */

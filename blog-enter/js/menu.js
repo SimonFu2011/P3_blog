@@ -12,6 +12,7 @@
     items: [],
     fanned: false,
     spread: 1,
+    retractTimer: 0,
 
     init() {
       this.list = document.getElementById('fanList');
@@ -52,6 +53,23 @@
       if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => this.layout());
       window.addEventListener('resize', () => this.layout());
       this.setIndex(3);
+      /* 入场态：菜单还没旋出，先把它整块关掉（Tab 顺序 + 命中测试） */
+      this.setInteractive(false);
+    },
+
+    /* 菜单是否可操作。
+       收起时 .fan-item 只是 opacity:0：它仍然在 Tab 顺序里、仍然能被命中，
+       白场上就会冒出一批"看不见但按得动"的链接。
+       inert 负责现代引擎（连读屏一起屏蔽），tabindex / pointer-events 兜底。 */
+    setInteractive(on) {
+      if (this.nav) {
+        this.nav.inert = !on;
+        this.nav.classList.toggle('is-open', on);
+      }
+      this.items.forEach(({ link }) => {
+        if (on) link.removeAttribute('tabindex');
+        else link.setAttribute('tabindex', '-1');
+      });
     },
 
     /* 依据视口算扇形半径与张角。
@@ -119,7 +137,7 @@
       const after = this.items.reduce((mx, { link }) => Math.max(mx, link.getBoundingClientRect().width), 0);
       const outermost = base * Math.cos(maxAngle) + after;
       if (outermost > rightRoom) fontScale = clamp(rightRoom / outermost, 0.5, 1);
-      this.nav.style.setProperty('--font-scale', fontScale.toFixed(3));
+      if (this.nav) this.nav.style.setProperty('--font-scale', fontScale.toFixed(3));
       this.metrics = { base: Math.round(base), widest: Math.round(widest), outermost: Math.round(outermost), rightRoom: Math.round(rightRoom), fontScale: Number(fontScale.toFixed(3)) };
     },
 
@@ -127,20 +145,42 @@
     fanOut() {
       if (this.fanned) return;
       this.fanned = true;
+      window.clearTimeout(this.retractTimer);
+      this.retractTimer = 0;
       this.items.forEach(({ el }, i) => {
+        el.classList.remove('is-in');     // 上一次的收起动画可能还在跑
         el.style.animationDelay = (220 + i * 105) + 'ms';
         el.classList.add('is-out');
       });
-      if (this.nav) this.nav.classList.add('is-open');
+      this.setInteractive(true);
     },
 
+    /* 收起：走 fanIn 反向动画。
+       原来只是把 is-out 摘掉，而 .fan-item 自己没有 transition ——
+       菜单会在出水过程里"瞬移消失"，和 1.05s 的展开完全不对称。 */
     retract() {
+      if (!this.fanned) return;
       this.fanned = false;
-      this.items.forEach(({ el }) => {
+      this.setInteractive(false);
+      window.clearTimeout(this.retractTimer);
+
+      const n = this.items.length;
+      this.items.forEach(({ el }, i) => {
         el.classList.remove('is-out');
-        el.style.animationDelay = '';
+        /* 错峰方向与展开相反：最先旋出的最后收回 */
+        el.style.animationDelay = ((n - 1 - i) * 45) + 'ms';
+        el.classList.add('is-in');
       });
-      if (this.nav) this.nav.classList.remove('is-open');
+      /* 动画结束后摘掉 is-in，让元素回到基态（opacity: 0）。
+         不能留着：is-in 与 is-out 同优先级、靠后者胜，留着会让下一次
+         fanOut 的 is-out 整个失效。 */
+      this.retractTimer = window.setTimeout(() => {
+        this.retractTimer = 0;
+        this.items.forEach(({ el }) => {
+          el.classList.remove('is-in');
+          el.style.animationDelay = '';
+        });
+      }, 520 + n * 45);
     },
 
     setIndex(i, { silent = false } = {}) {
@@ -186,6 +226,9 @@
 
     /* 键盘 */
     handleKey(key, event) {
+      /* 菜单收起/正在收起时不响应：否则出水过程中方向键会改动选中项，
+         但画面上没有任何东西跟着动 */
+      if (!this.fanned) return false;
       switch (key) {
         case 'ArrowDown': case 'ArrowRight': case 's':
           event.preventDefault(); this.move(1); return true;
