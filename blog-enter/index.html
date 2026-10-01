@@ -45,7 +45,9 @@
   <!-- 水面之上的强光带（阳光射入水面） -->
   <div class="sunbeams" id="sunbeams" aria-hidden="true"></div>
 
-  <!-- 折射层：焦散与（可选的）角色挂载点都在这一层里被扭曲 -->
+  <!-- 折射层：水波 Canvas 与（可选的）角色挂载点都在这一层
+       Canvas 的 CSS 尺寸 = 视口；像素尺寸 = CSS × min(dpr, 1.5)；
+       水波在更小的模拟网格上用波方程推进，再放大到这里（第五项）。 -->
   <div class="refract" id="refract">
     <canvas class="caustics-canvas" id="caustics" aria-hidden="true"></canvas>
 
@@ -63,6 +65,42 @@
 
   <!-- 水面波光（横向掠过的光带） -->
   <div class="surface-sheen" id="sheen" aria-hidden="true"></div>
+
+  <!-- ============================================================
+       同心圆时钟 + 黑胶（第六项）
+       ------------------------------------------------------------
+       · 外圈：I–XII 罗马数字（JS 生成）+ 时针/分针，按现实时间走
+       · 内圈：黑胶唱片持续旋转，中央是圆形裁切的专辑封面；
+               没有音源时用内置占位封面与占位歌名（data.js 的 music 段）
+       · 先放唱片、再把表盘 SVG 叠在上面 —— 指针因此压在唱片之上
+       · 整块 pointer-events: none，只有折叠按钮可点，不会和扇形菜单抢点击
+       ============================================================ -->
+  <aside class="dock" id="dock" aria-hidden="true">
+    <button class="dock-toggle" id="dockToggle" type="button" aria-expanded="true"
+            aria-label="收起时钟与播放信息">
+      <span class="dt-face"><i class="dt-hand dt-h"></i><i class="dt-hand dt-m"></i></span>
+    </button>
+    <div class="dock-body">
+      <div class="dial" id="dial" role="img" aria-label="时钟：当前时间 --:--">
+        <div class="vinyl" id="vinyl" role="group" aria-label="播放信息：暂无播放">
+          <span class="vinyl-disc"><span class="vinyl-cover" id="vinylCover"></span></span>
+        </div>
+        <svg class="dial-svg" viewBox="0 0 200 200" aria-hidden="true" focusable="false">
+          <circle class="dial-rim" cx="100" cy="100" r="96"></circle>
+          <circle class="dial-rim2" cx="100" cy="100" r="88"></circle>
+          <circle class="dial-rim3" cx="100" cy="100" r="48"></circle>
+          <g id="dialNumerals" class="dial-numerals"></g>
+          <line id="dialHour" class="dial-hand dial-hand-h" x1="100" y1="100" x2="100" y2="46"></line>
+          <line id="dialMin" class="dial-hand dial-hand-m" x1="100" y1="100" x2="100" y2="34"></line>
+          <circle class="dial-pivot" cx="100" cy="100" r="4.2"></circle>
+        </svg>
+      </div>
+      <div class="vinyl-meta">
+        <span class="vinyl-title" id="vinylTitle">暂无播放</span>
+        <span class="vinyl-sub" id="vinylSub">NO TRACK</span>
+      </div>
+    </div>
+  </aside>
 
   <!-- ============================================================
        扇形放射菜单
@@ -88,20 +126,25 @@
 </div>
 
 <!-- ============================================================
-     入场提示（纯白页面上的那一点涟漪）
+     入场提示（纯白页面 + 极简空心箭头）
+     ------------------------------------------------------------
+     · 三段文案按 180ms 依次淡入（见 CSS 的 entryIn），总时长 860ms
+     · 文案在箭头上方；箭头是 <button>，天然可聚焦、可回车
+     · 标题上的 data-text 是给 ::after 做"字形遮罩"用的同一段文字，
+       两者必须完全一致，否则波线会错位（见 CSS 的 .entry-name::after）
      ============================================================ -->
 <div class="entry" id="entry">
   <div class="entry-inner">
-    <div class="entry-name">YOUR&nbsp;NAME</div>
+    <div class="entry-name" id="entryName" data-text="YOUR&nbsp;NAME">YOUR&nbsp;NAME</div>
     <p class="entry-tag">PERSONAL&nbsp;SITE&nbsp;/&nbsp;落水而入</p>
-    <div class="ripple-btn" id="rippleBtn" role="button" tabindex="0" aria-label="进入站点">
-      <span class="rb-ring"></span>
-      <span class="rb-ring d2"></span>
-      <span class="rb-ring d3"></span>
-      <span class="rb-core"></span>
-      <span class="rb-text">ENTER</span>
-    </div>
-    <p class="entry-hint"><span class="k">ENTER</span> 或 <span class="k">滚轮下滑</span> 入水</p>
+    <p class="entry-hint"><span class="k">ENTER</span> 或 <span class="k">滚轮下滑</span></p>
+    <button class="enter-arrow" id="enterArrow" type="button" aria-label="进入">
+      <svg class="arrow-svg" viewBox="0 0 40 56" aria-hidden="true" focusable="false">
+        <path d="M20.6 5.2 C 20.2 18.4 19.6 30.6 20.1 47.6"></path>
+        <path d="M8.4 34.8 C 12.6 39.9 16.3 44.1 20.1 49.4"></path>
+        <path d="M31.9 34.1 C 27.6 39.4 23.8 43.8 20.1 49.4"></path>
+      </svg>
+    </button>
   </div>
 </div>
 
@@ -111,6 +154,7 @@
 <script src="js/data.js" defer></script>
 <script src="js/character.js" defer></script>
 <script src="js/water.js" defer></script>
+<script src="js/dock.js" defer></script>
 <script src="js/menu.js" defer></script>
 <script src="js/boot.js" defer></script>
 </body>

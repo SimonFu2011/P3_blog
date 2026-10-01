@@ -33,6 +33,13 @@
   --red: #ff1f3d;
   --red-2: #ff4257;
 
+  /* 天蓝：新增元素（入口箭头 / 标题波线 / 时钟 / 黑胶）的唯一色源。
+     深色底用 --sky / --sky-2；浅色底用 --sky-deep —— #38BDF8 对白底只有
+     2.2:1，#0284C7 约 4.4:1，才够 UI 组件的 3:1 非文本对比度。 */
+  --sky: #38bdf8;
+  --sky-2: #7dd3fc;
+  --sky-deep: #0284c7;
+
   --font-jp: "Yu Gothic UI", "Yu Gothic", "Meiryo", "Noto Sans JP", "Microsoft YaHei UI", sans-serif;
   --font-en: "Bahnschrift", "Arial Black", "Impact", "Segoe UI", sans-serif;
   --font-num: "Bahnschrift", "Consolas", monospace;
@@ -70,7 +77,11 @@ h1, h2, p { margin: 0; }
   position: fixed; inset: 0; overflow: hidden;
   isolation: isolate;
   background: var(--white);
+  /* 第四项：ESC 淡出用 */
+  transition: opacity .25s ease;
 }
+/* ESC：整屏淡出 250ms → JS 在淡出结束后做完整重置 → 再撤掉这个类淡回来 */
+body.is-resetting .world { opacity: 0; pointer-events: none; }
 
 .water {
   position: absolute; inset: 0;
@@ -147,7 +158,9 @@ body.is-underwater { --fall: 1; }
    折射层 + 焦散
    ============================================================ */
 .refract {
-  position: absolute; inset: -6%;
+  /* inset: 0 —— 第五项第 2 条要求 Canvas 的 CSS 尺寸等于视口。
+     原来是 -6%（为了躲开已移除的 SVG 滤镜边缘），现在没有这个必要了。 */
+  position: absolute; inset: 0;
   /* ------------------------------------------------------------
      这里原本是 body.is-underwater .refract { filter: url(#waterRefract) }，
      但那个 feDisplacementMap 的 scale 恒为 0：位移量为零 = 纯 no-op，
@@ -172,9 +185,9 @@ body.is-underwater { --fall: 1; }
   opacity: 0;
   pointer-events: none;
   z-index: 0;
-  /* 小画布拉伸上来，天然的柔化 */
+  /* 模拟缓冲由 drawImage 双线性放大，本身就够柔了；这里不再挂 CSS filter
+     —— 那会让浏览器每帧多做一趟全屏滤镜。饱和度已经烘进像素色值。 */
   image-rendering: auto;
-  filter: blur(.8px) saturate(1.1);
   transition: opacity .7s ease;
 }
 body.is-underwater .caustics-canvas { opacity: .62; }
@@ -278,23 +291,86 @@ body.is-underwater .caustics-canvas { opacity: .62; }
 
 /* ============================================================
    入场页（纯白 + 细微波纹）
+   ------------------------------------------------------------
+   第一项：大标题 → 副标题 → 提示文案，180ms 逐级淡入，单元素 500ms，
+   总时长 360 + 500 = 860ms（< 1s）。
+   用纯 CSS 动画：只在文档载入时播一次。之后切显隐一律用 visibility，
+   绝不用 display —— 按 CSS 规范 display:none 会终止并重启元素上的动画，
+   那样 ESC 重置回来首屏动画就会重播，违反第一项第 7 条。
    ============================================================ */
 .entry {
   position: fixed; inset: 0; z-index: 50;
   display: grid; place-items: center;
   background: transparent;
-  transition: opacity .5s ease, filter .5s ease;
+  transition: opacity .5s ease, filter .5s ease, visibility .5s;
 }
 .entry.is-diving { opacity: 0; filter: blur(8px); pointer-events: none; }
+/* 入水后彻底隐藏：用 visibility 而不是 display（见上面的说明） */
+.entry.is-hidden { visibility: hidden; }
 .entry-inner { text-align: center; transform: translateY(-4vh); }
 
+/* ---- 第一项：三级淡入 ---- */
+.entry-name, .entry-tag, .entry-hint, .enter-arrow {
+  opacity: 0;
+  animation: entryIn 500ms cubic-bezier(.16, .84, .28, 1) var(--entry-delay, 0ms) both;
+}
+.entry-tag { --entry-delay: 180ms; }
+.entry-hint { --entry-delay: 360ms; }
+.enter-arrow { --entry-delay: 360ms; }
+/* 位移动画用独立的 translate 属性，这样不会覆盖各元素自己的 transform（斜切） */
+@keyframes entryIn {
+  from { opacity: 0; translate: 0 12px; }
+  to   { opacity: 1; translate: 0 0; }
+}
+/* ESC 重置回来时把三段文案钉在终态（不重播，第一项第 7 条） */
+.entry.is-intro-done .entry-name,
+.entry.is-intro-done .entry-tag,
+.entry.is-intro-done .entry-hint,
+.entry.is-intro-done .enter-arrow {
+  animation: none;
+  opacity: 1;
+  translate: none;
+}
+
+/* ---- 大标题：第二项（字重 800–900 + 字形内部的持续波线） ---- */
 .entry-name {
+  position: relative;
   font-family: var(--font-en);
+  font-weight: 900;
   font-size: clamp(38px, 7.6vw, 118px);
   line-height: .94; letter-spacing: .04em;
   color: var(--ink);
   transform: skewX(-7deg);
 }
+/* 波线的实现说明
+   ------------------------------------------------------------
+   规格建议优先用 SVG mask，但标题是 HTML 文本：用 SVG mask 就必须把同一段
+   文字在 SVG 里按同样的字体度量再排一遍（ascent/descent 会随字体回退变化），
+   无法保证与 HTML 文本逐像素对齐；一旦错位，波线会溢出字形。
+   这里改用 ::after + content: attr(data-text) 复制同一段文本，再用
+   background-clip: text 把 SVG 波纹图案裁进字形内部 —— 文字仍由浏览器
+   自己排版，对齐误差为零，而且完全不改布局（绝对定位覆盖）。
+   波线为 #38BDF8、低透明度，只在字形内部流动，不影响识别。 */
+.entry-name::after {
+  content: attr(data-text);
+  position: absolute; inset: 0;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background-repeat: repeat;
+  background-size: 220px 56px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='56'%3E%3Cg fill='none' stroke='%2338BDF8' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M0 7C18.3 2 36.7 12 55 7C73.3 2 91.7 12 110 7C128.3 2 146.7 12 165 7C183.3 2 201.7 12 220 7'/%3E%3Cpath d='M0 21C18.3 16 36.7 26 55 21C73.3 16 91.7 26 110 21C128.3 16 146.7 26 165 21C183.3 16 201.7 26 220 21'/%3E%3Cpath d='M0 35C18.3 30 36.7 40 55 35C73.3 30 91.7 40 110 35C128.3 30 146.7 40 165 35C183.3 30 201.7 40 220 35'/%3E%3Cpath d='M0 49C18.3 44 36.7 54 55 49C73.3 44 91.7 54 110 49C128.3 44 146.7 54 165 49C183.3 44 201.7 54 220 49'/%3E%3C/g%3E%3C/svg%3E");
+  -webkit-background-clip: text;
+  background-clip: text;
+  opacity: .2;                              /* 第二项第 4 条：0.15–0.25 */
+  pointer-events: none;
+  /* 位移量取 background-size 的整数倍 → 无缝循环 */
+  animation: titleFlow 9s linear infinite;
+}
+@keyframes titleFlow {
+  from { background-position: 0 0; }
+  to   { background-position: -220px -56px; }
+}
+
 .entry-tag {
   margin-top: 10px;
   font-size: clamp(11px, 1.15vw, 15px);
@@ -302,49 +378,50 @@ body.is-underwater .caustics-canvas { opacity: .62; }
   transform: skewX(-7deg);
 }
 
-/* 涟漪按钮：那"一点波纹" */
-.ripple-btn {
-  position: relative;
-  width: clamp(112px, 12vw, 168px);
-  height: clamp(112px, 12vw, 168px);
-  margin: clamp(26px, 5vh, 60px) auto 0;
-  display: grid; place-items: center;
-  border-radius: 50%;
+/* ---- 第三项：入口箭头（取代原来的 ENTER 涟漪按钮） ----
+   浅色底上用 --sky-deep：对白底约 4.4:1，满足 UI 组件 3:1 的非文本对比度；
+   hover / active 才换更亮的 --sky / --sky-2。箭头是真正的 <button>，
+   天然可聚焦、可回车；键盘 Enter 由全局 keydown 处理，两条路进同一个
+   dive()（dive 自带状态守卫，同时触发也只入水一次）。 */
+.enter-arrow {
+  display: block;
+  margin: clamp(14px, 3.2vh, 36px) auto 0;
+  padding: 6px;
+  width: clamp(42px, 4.6vw, 58px);
+  border: 0;
+  background: none;
   cursor: pointer;
-  transform: skewX(-7deg);
+  color: var(--sky-deep);
+  transition: color .22s ease, scale .28s cubic-bezier(.2, 1.3, .4, 1);
 }
-.rb-ring, .rb-core {
-  position: absolute; inset: 0; border-radius: 50%;
+.arrow-svg {
+  display: block;
+  width: 100%; height: auto;
+  overflow: visible;
+  animation: arrowBob 2.6s ease-in-out 1s infinite;
 }
-.rb-ring { border: 2px solid rgba(27, 127, 212, .55); animation: ringOut 4.2s cubic-bezier(.2, .6, .2, 1) infinite; }
-.rb-ring.d2 { animation-delay: 1.4s; border-color: rgba(53, 211, 255, .5); }
-.rb-ring.d3 { animation-delay: 2.8s; border-color: rgba(27, 127, 212, .35); }
-@keyframes ringOut {
-  0%   { transform: scale(.28); opacity: 0; }
-  18%  { opacity: .9; }
-  100% { transform: scale(1.5); opacity: 0; }
+@keyframes arrowBob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(6px); }
 }
-.rb-core {
-  inset: 30%;
-  background: radial-gradient(circle at 34% 30%, #ffffff, var(--cyan-2) 46%, var(--blue) 100%);
-  box-shadow: 0 10px 34px -8px rgba(27, 127, 212, .75);
-  animation: coreFloat 3.6s ease-in-out infinite alternate;
+/* 手绘感：只描边不填充、圆头圆角、线条带轻微不规则（路径本身不对称） */
+.enter-arrow path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;        /* 缩放时线宽保持均匀 */
 }
-@keyframes coreFloat { from { transform: translateY(-3px) scale(1); } to { transform: translateY(3px) scale(1.05); } }
-.rb-text {
-  position: relative; z-index: 2;
-  font-family: var(--font-en); font-size: clamp(14px, 1.5vw, 20px);
-  letter-spacing: .3em; color: var(--ink);
-}
-.ripple-btn:hover .rb-core { animation-duration: 1.6s; }
-.ripple-btn:hover .rb-text { color: var(--red); }
+.enter-arrow:hover { color: var(--sky); scale: 1.06; }
+.enter-arrow:active { color: var(--sky-2); scale: .94; }
+.enter-arrow:focus-visible { outline: 3px solid var(--sky-deep); outline-offset: 6px; }
 
+/* 提示文案在箭头之上（第三项第 5 条） */
 .entry-hint {
-  margin-top: clamp(18px, 3vh, 34px);
-  font-size: 12px; letter-spacing: .26em; color: var(--teal-2);
-  animation: hintPulse 2.6s ease-in-out infinite;
+  margin-top: clamp(20px, 3.4vh, 40px);
+  font-size: 12px; letter-spacing: .26em; color: var(--sky-deep);
 }
-@keyframes hintPulse { 50% { opacity: .42; } }
 .entry-hint .k, .cmd-keys b {
   display: inline-block; padding: 1px 7px; margin: 0 3px;
   border: 1px solid currentColor; border-radius: 2px;
@@ -584,6 +661,131 @@ body.is-underwater .credit { opacity: .8; }
 }
 
 /* ============================================================
+   左侧同心圆时钟 + 黑胶（第六项）
+   ------------------------------------------------------------
+   桌面端固定 left: 24px、垂直居中；≤900px 收成小钟按钮，点击展开。
+   整块 pointer-events: none，只有折叠按钮可点 —— 保证永远不与扇形菜单
+   抢点击（验收第 7 条"无交互冲突"）。
+   ============================================================ */
+.dock {
+  /* 尺寸同时受宽高限制：矮窗口会自动缩小，移动端在媒体查询里改写 */
+  --dial: clamp(104px, min(11vw, 23vh), 176px);
+  position: absolute;
+  left: 24px; top: 50%;
+  translate: 0 -50%;
+  z-index: 30;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  width: calc(var(--dial) + 28px);
+  padding: 12px 12px 10px;
+  border-left: 2px solid rgba(56, 189, 248, .5);
+  border-radius: 14px;
+  background: linear-gradient(150deg, rgba(6, 20, 49, .5), rgba(3, 11, 30, .22));
+  backdrop-filter: blur(4px);
+  color: var(--sky-2);
+  opacity: 0; visibility: hidden;
+  transition: opacity .5s ease, visibility .5s;
+  pointer-events: none;
+}
+.dock.is-on { opacity: 1; visibility: visible; }
+.dock-body {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  width: 100%;
+}
+
+/* 表盘与黑胶叠在同一个方盒里：唱片在下、表盘指针在上 */
+.dial { position: relative; width: var(--dial); height: var(--dial); }
+.dial-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.dial-rim { fill: none; stroke: rgba(56, 189, 248, .55); stroke-width: 1.6; }
+.dial-rim2 { fill: none; stroke: rgba(125, 211, 252, .22); stroke-width: .8; }
+.dial-rim3 { fill: none; stroke: rgba(56, 189, 248, .35); stroke-width: 1; }
+.dial-numeral {
+  font-family: var(--font-num); font-size: 13.5px;
+  fill: var(--sky-2); text-anchor: middle; dominant-baseline: middle;
+}
+.dial-hand { stroke: var(--sky-2); stroke-linecap: round; }
+.dial-hand-h { stroke-width: 4.6; }
+.dial-hand-m { stroke: var(--sky); stroke-width: 2.4; }
+.dial-pivot { fill: var(--sky); }
+
+.vinyl { position: absolute; inset: 0; display: grid; place-items: center; }
+.vinyl-disc {
+  position: relative; display: block;
+  width: 44%; aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  border: 1px solid rgba(125, 211, 252, .4);
+  background:
+    repeating-radial-gradient(circle at 50% 50%, rgba(125, 211, 252, .09) 0 1px, transparent 1px 4px),
+    radial-gradient(circle at 50% 50%, #0b2b45 0%, #04121e 74%);
+  box-shadow: inset 0 0 18px rgba(56, 189, 248, .28), 0 6px 20px -10px rgba(0, 0, 0, .8);
+}
+.vinyl-disc.is-spinning { animation: vinylSpin 12s linear infinite; }
+@keyframes vinylSpin { to { rotate: 360deg; } }
+
+/* 圆形裁切的封面；没有封面图时留一个偏心高光的占位盘，
+   顺便让"在黑胶上转"这件事看得出来 */
+.vinyl-cover {
+  position: absolute; inset: 26%;
+  display: block;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid rgba(2, 18, 30, .7);
+  background: radial-gradient(circle at 34% 28%, var(--sky-2) 0%, var(--sky) 44%, var(--sky-deep) 100%);
+}
+.vinyl-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.vinyl-cover::after {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 12%; height: 12%; margin: -6% 0 0 -6%;
+  border-radius: 50%; background: rgba(3, 20, 32, .85);
+}
+
+.vinyl-meta { width: 100%; text-align: center; }
+.vinyl-title {
+  display: block; max-width: 100%;
+  font-size: 12px; letter-spacing: .14em; color: var(--sky-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vinyl-sub {
+  display: block; max-width: 100%;
+  font-family: var(--font-num); font-size: 10px; letter-spacing: .26em;
+  color: rgba(125, 211, 252, .62);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 折叠按钮：桌面端不显示，窄屏显示 */
+.dock-toggle {
+  display: none;
+  place-items: center;
+  width: 46px; height: 46px;
+  padding: 0;
+  border: 1px solid rgba(56, 189, 248, .55);
+  border-radius: 50%;
+  background: rgba(3, 18, 32, .55);
+  color: var(--sky-2);
+  cursor: pointer;
+  pointer-events: auto;                  /* 整块不可点，只有它可点 */
+}
+.dt-face {
+  position: relative; display: block;
+  width: 22px; height: 22px;
+  border: 1.4px solid currentColor; border-radius: 50%;
+}
+.dt-hand { position: absolute; left: 50%; top: 50%; display: block; background: currentColor; transform-origin: 0 50%; }
+.dt-h { width: 6px; height: 1.8px; margin-top: -.9px; transform: rotate(-60deg); }
+.dt-m { width: 8px; height: 1.4px; margin-top: .9px; transform: rotate(40deg); }
+.dock-toggle:hover { color: var(--sky); border-color: var(--sky); }
+.dock-toggle:focus-visible { outline: 3px solid var(--sky-deep); outline-offset: 4px; }
+
+/* 页面隐藏时暂停"持续波动"类 CSS 动画（水波由 JS 那边暂停） */
+body.is-page-hidden .entry-name::after,
+body.is-page-hidden .arrow-svg,
+body.is-page-hidden .vinyl-disc.is-spinning,
+body.is-page-hidden .water-grain,
+body.is-page-hidden .sunbeams,
+body.is-page-hidden .bubble {
+  animation-play-state: paused;
+}
+
+/* ============================================================
    响应式
    ------------------------------------------------------------
    角色已移除，扇形原点可以更自由地横向铺开。
@@ -595,6 +797,20 @@ body.is-underwater .credit { opacity: .8; }
 @media (max-width: 900px) {
   :root { --fan-origin-x: 36%; }
   .entry-inner { transform: translateY(-2vh); }
+
+  /* 第六项第 3 条：移动端收成小钟按钮，点击展开；展开后是一块浮层，
+     尺寸也改由宽度主导（原来的 11vw 在窄屏上会小到看不清刻度） */
+  .dock {
+    --dial: clamp(96px, min(46vw, 34vh), 168px);
+    left: 12px;
+  }
+  .dock-toggle { display: grid; }
+  .dock.is-collapsed {
+    width: auto; padding: 0;
+    border: 0; border-radius: 50%;
+    background: none; backdrop-filter: none;
+  }
+  .dock.is-collapsed .dock-body { display: none; }
 }
 @media (max-width: 620px) {
   .credit { display: none; }
@@ -608,5 +824,13 @@ body.is-underwater .credit { opacity: .8; }
     animation-duration: .001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: .12s !important;
+  }
+  /* 第一项第 7 条：直接显示、不做位移。
+     必须显式写 animation: none —— 只把时长压到 .001ms 的话，
+     animation-delay（180/360ms）仍然生效，开场会先空一段再突然出现。 */
+  .entry-name, .entry-tag, .entry-hint, .enter-arrow {
+    animation: none;
+    opacity: 1;
+    translate: none;
   }
 }

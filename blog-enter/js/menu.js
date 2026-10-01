@@ -183,6 +183,21 @@
       }, 520 + n * 45);
     },
 
+    /* 第四项：ESC 重置时的硬收起。
+       此刻画面已经淡出，不需要反向动画 —— 直接清干净回到"一条都没旋出"
+       的初始态，下次入水时 fanOut 才能从头播一遍。 */
+    reset() {
+      window.clearTimeout(this.retractTimer);
+      this.retractTimer = 0;
+      this.fanned = false;
+      this.items.forEach(({ el }) => {
+        el.classList.remove('is-out', 'is-in');
+        el.style.animationDelay = '';
+      });
+      this.setInteractive(false);
+      this.setIndex(3, { silent: true });   // 回到初始选中项
+    },
+
     setIndex(i, { silent = false } = {}) {
       if (!this.items.length) return;
       const n = this.items.length;
