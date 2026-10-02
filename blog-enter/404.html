@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>404 — 这里没有东西</title>
+<meta name="description" content="页面不存在。沉到水底了。">
+<link rel="stylesheet" href="css/pages.css">
+</head>
+<body>
+
+<a class="skip" href="#main">跳到正文</a>
+
+<nav class="nav" id="nav" aria-label="站点导航">
+  <div class="nav-bar">
+    <a class="nav-brand" href="index.html">
+      <span class="nav-brand-name" data-site-name>SIMON 的个人站</span>
+      <span class="nav-brand-tag" data-site-sub>PERSONAL SITE</span>
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="navList">
+      <span class="nt-bars" aria-hidden="true"><i></i><i></i></span>
+      <span class="nt-text-closed">MENU</span>
+      <span class="nt-text-open">CLOSE</span>
+    </button>
+  </div>
+
+  <ul class="nav-list" id="navList">
+    <li><a class="nav-link" href="about.html"><span class="nl-en">ABOUT</span><span class="nl-cn">关于我</span></a></li>
+    <li><a class="nav-link" href="archive.html"><span class="nl-en">ARTICLES</span><span class="nl-cn">博客文章</span></a></li>
+    <li><a class="nav-link is-todo" href="index.html" data-todo="待定"><span class="nl-en">TBD</span><span class="nl-cn">待定</span></a></li>
+  </ul>
+
+  <div class="nav-foot">
+    <a class="nav-back" href="index.html">BACK TO ENTRY</a>
+    <span data-year>© 2026 SIMON 的个人站</span>
+  </div>
+</nav>
+<div class="nav-scrim" role="presentation"></div>
+
+<div class="page">
+  <main class="main" id="main">
+
+    <section class="err" aria-labelledby="errTitle">
+      <!-- 空心描边 + 红色叠印：与站内大标题同一套分色手法 -->
+      <p class="err-code" data-text="404" aria-hidden="true">404</p>
+
+      <div>
+        <span class="page-kicker">NOT FOUND</span>
+        <h1 class="err-title" id="errTitle">这一页沉到水底了</h1>
+        <p class="err-en">THIS PAGE WENT UNDER</p>
+      </div>
+
+      <p class="err-text">
+        地址 <code id="errPath">/</code> 没有对应的页面。可能是链接过期了，
+        也可能是这个栏目还没做 —— 目前站点只有三处内容：主界面、关于我、博客文章。
+      </p>
+
+      <div class="err-actions">
+        <a class="btn is-primary" href="index.html">回主界面 <span class="kbd">ESC</span></a>
+        <a class="btn" href="archive.html">看全部文章</a>
+        <a class="btn" href="about.html">关于我</a>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <span class="f-brand" data-site-name>SIMON 的个人站</span>
+    <span>落水而入 · 静态站点</span>
+    <span class="f-right"><span data-foot-note>按 ESC 回主界面</span> · © <span data-year>2025</span></span>
+  </footer>
+</div>
+
+<script src="js/data.js" defer></script>
+<script src="js/pages.js" defer></script>
+<script>
+/* 把用户实际访问的路径填进提示里 —— 出错信息里带上"你访问的是什么"，
+   比一句干巴巴的"页面不存在"有用得多。file:// 下 pathname 依然可读。 */
+document.addEventListener('DOMContentLoaded', function () {
+  var el = document.getElementById('errPath');
+  if (!el) return;
+  var p = window.location.pathname + window.location.search + window.location.hash;
+  el.textContent = p || '/';
+});
+</script>
+</body>
+</html>

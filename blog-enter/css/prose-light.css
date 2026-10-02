@@ -1,0 +1,346 @@
+/* ============================================================
+   文章正文 · 纯白极简皮肤
+   ------------------------------------------------------------
+   这一份只做一件事：把 pages.css 里"深水底"那套正文样式，换成与
+   geo.css 同一套的纯白极简皮肤。加载顺序必须是
+       pages.css → geo.css → prose-light.css
+   （同为一条 CSS 级联，靠顺序取胜；geo.css 负责页面骨架，
+    这一份负责正文与文章页专有的那些块。）
+
+   ── 为什么单独一个文件，而不是塞进 geo.css ──
+   geo.css 服务的是"关于我 / 归档"这两页；正文排版（.prose、代码块、
+   上下篇、评论区）只出现在文章详情页。放一起会让 geo.css 变成
+   "什么都管"的大文件，也会让归档页白白多解析 200 行用不到的规则。
+   单独一份还有个好处：哪一页要换皮肤，就在它的 <link> 里加一行，
+   影响范围一眼可见（404.html 目前仍是深色，加一行即可统一）。
+
+   ── 两条纪律 ──
+   1. 凡是要清掉深色版填充 / 阴影 / 圆角的，必须显式写
+      background: none / box-shadow: none / border-radius: 0 ——
+      深色版的规则并没有消失，只是被后加载的同权重规则覆盖。
+   2. 颜色一律从 --g-* 取，不新增色值。白底上的档位是 geo.css 里
+      按对比度定死的：
+        --g-ink 18.4:1 正文/标题   --g-teal 13.2:1 次强
+        --g-teal-2 8.5:1 次要      --g-cyan-dk 6.0:1 链接/小标签
+        --g-red-dk 5.9:1 红色文字  --g-mute 5.0:1 注释小字
+        --g-red 只有 3.8:1，**只做图形**（括号、标记、下划线）
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   1. 正文：字号与基本色
+   ------------------------------------------------------------ */
+.prose {
+  color: var(--g-ink);
+  font-size: 16.5px;
+  line-height: 2.02;          /* 白底上比深底更需要行距，长文才不挤 */
+}
+.prose p { color: var(--g-ink); }
+
+/* 小节标题：与归档页 .section-head 同一手法 —— 发丝线 + 左侧红标记 */
+.prose h2,
+.prose h3,
+.prose h4 {
+  color: var(--g-ink);
+  font-weight: 900;
+  letter-spacing: -.005em;
+}
+.prose h2 {
+  padding-bottom: .34em;
+  border-bottom: var(--g-hair) solid var(--g-rule);
+}
+.prose h2::before {
+  content: "";
+  display: inline-block;
+  width: 22px; height: 3px;
+  margin-right: 12px;
+  background: var(--g-red);
+  transform: skewX(-16deg) translateY(-4px);
+  /* 深色版给这个标记加了发光；白底上不要发光 */
+  box-shadow: none;
+}
+.prose h3 { color: var(--g-teal); }
+.prose h4 { color: var(--g-cyan-dk); }
+
+/* 强调与斜体 */
+.prose strong { color: var(--g-teal); font-weight: 700; }
+.prose em { color: var(--g-teal-2); font-style: italic; }
+.prose mark { background: rgba(56, 189, 248, .28); color: var(--g-ink); }
+.prose abbr { text-decoration-color: var(--g-rule-2); }
+
+/* 链接：白底上用 --g-cyan-dk；悬停时下划线变红（红只当图形用） */
+.prose a {
+  color: var(--g-cyan-dk);
+  border-bottom: 1px solid var(--g-rule-2);
+  background: none;
+}
+.prose a:hover {
+  color: var(--g-teal);
+  border-bottom-color: var(--g-red);
+}
+
+/* ------------------------------------------------------------
+   2. 列表：用红/青的小标记，与几何皮肤的"点阵/细线"呼应
+   ------------------------------------------------------------ */
+.prose ul > li::before {
+  background: var(--g-red);
+  border-radius: 0;
+  box-shadow: none;
+}
+.prose ol { counter-reset: li; }
+.prose ol > li::before {
+  color: var(--g-cyan-dk);
+  background: none;
+  font-family: var(--font-num);
+}
+
+/* ------------------------------------------------------------
+   3. 行内代码与引用
+   ------------------------------------------------------------ */
+.prose :not(pre) > code {
+  padding: .16em .45em;
+  border: 1px solid var(--g-rule);
+  border-radius: 0;
+  background: var(--g-tint);
+  color: var(--g-cyan-dk);
+  font-family: var(--font-code);
+  font-size: .88em;
+  overflow-wrap: anywhere;
+}
+
+/* 引用：左侧红竖线 + 极淡的青底；深色版的红光渐变换成纯色淡底 */
+.prose blockquote {
+  padding: 6px 0 6px 22px;
+  border-left: 3px solid var(--g-red);
+  background: linear-gradient(90deg, rgba(2, 132, 199, .07), rgba(2, 132, 199, 0) 74%);
+  color: var(--g-teal);
+  font-style: italic;
+}
+.prose blockquote cite {
+  color: var(--g-mute);
+  font-style: normal;
+}
+.prose blockquote cite::before { color: var(--g-red); }
+
+/* 分隔线 */
+.prose hr {
+  border: 0;
+  border-top: var(--g-hair) solid var(--g-rule-2);
+  background: none;
+}
+
+/* ------------------------------------------------------------
+   4. 代码块
+   ------------------------------------------------------------ */
+.code-block {
+  min-width: 0;
+  margin: 1.6em 0;
+  border: 1px solid var(--g-rule-2);
+  border-radius: 0;
+  background: var(--g-paper);
+  overflow: hidden;
+  box-shadow: none;
+}
+.code-head {
+  padding: 8px 12px;
+  background: var(--g-tint);
+  border-bottom: var(--g-hair) solid var(--g-rule);
+}
+.code-lang {
+  font-family: var(--font-en); font-weight: 900; font-style: italic;
+  font-size: 10.5px; letter-spacing: .22em;
+  color: var(--g-teal-2);
+}
+.code-lang::before {
+  content: ""; display: inline-block;
+  width: 18px; height: 2px; margin-right: 8px;
+  background: var(--g-red);
+  transform: translateY(-3px);
+}
+.code-copy {
+  margin-left: auto;
+  padding: 4px 11px;
+  border: 1px solid var(--g-rule-2);
+  border-radius: 0;                       /* 深色版是胶囊形，几何皮肤一律直角 */
+  background: #fff;
+  color: var(--g-teal-2);
+  font-size: 11px; letter-spacing: .12em;
+  cursor: pointer;
+  transition: border-color .18s ease, color .18s ease, background-color .18s ease;
+}
+.code-copy:hover { border-color: var(--g-cyan-dk); color: var(--g-cyan-dk); background: var(--g-tint); }
+.code-copy.is-done {
+  border-color: var(--g-cyan-dk);
+  color: #fff;
+  background: var(--g-cyan-dk);
+}
+.code-block pre {
+  width: 100%;
+  max-width: 100%;
+  padding: 16px 18px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  font-family: var(--font-code);
+  font-size: 13.5px; line-height: 1.72;
+  color: var(--g-teal);                   /* 深色版是 #d7f2ff 浅蓝，白底上必须换深 */
+  background: none;
+  tab-size: 2;
+}
+.code-block code { font-family: inherit; background: none; }
+
+/* 语法高亮：白底专用的一套。
+   深色版那组（#ff7085 / #8fe3a8 / #ffd479 …）在 --g-paper 上只有 1.5~2:1，
+   基本看不清，所以不是"微调"而是换一组：全部选深色、整体保持 6.5:1 以上，
+   色相仍沿用站点唯一的两个强调色（红 / 青）加中性的暖黄与绿。 */
+.tok-kw  { color: #b3123a; }   /* 关键字：深红 */
+.tok-str { color: #0f6b3f; }   /* 字符串：深绿 */
+.tok-num { color: #8a5300; }   /* 数字：深琥珀 */
+.tok-com { color: var(--g-mute); font-style: italic; }   /* 注释 */
+.tok-fn  { color: #0b5c86; }   /* 函数名：深青 */
+.tok-tag { color: #8a1a5a; }   /* 标签：深品红 */
+.tok-att { color: #8a5300; }   /* 属性：同数字 */
+
+/* ------------------------------------------------------------
+   5. 配图
+   ------------------------------------------------------------ */
+.prose figure img {
+  border: var(--g-hair) solid var(--g-rule);
+  border-radius: 0;
+  background: var(--g-paper);
+  box-shadow: none;
+}
+.prose figcaption {
+  color: var(--g-mute);
+  font-size: 12.5px;
+}
+.prose figcaption::before {
+  content: ""; display: inline-block;
+  width: 16px; height: 2px; margin-right: 8px;
+  background: var(--g-cyan);
+  transform: translateY(-4px);
+}
+
+/* ------------------------------------------------------------
+   6. 文章页专有：面包屑 / 抬头 / 标签 / 页脚 / 上下篇
+   ------------------------------------------------------------ */
+.crumbs { color: var(--g-mute); }
+.crumbs a { color: var(--g-teal-2); }
+.crumbs a:hover { color: var(--g-cyan-dk); }
+.crumbs .sep { color: var(--g-mute-2); }
+
+.article-title {
+  color: var(--g-ink);
+  /* 深色版是白字 + 红青偏移；白底上字要深，偏移保留但压淡 */
+  text-shadow: -.014em -.012em 0 rgba(255, 31, 61, .30), .016em .016em 0 rgba(56, 189, 248, .30);
+}
+.article-meta { color: var(--g-mute); }
+.article-meta time { color: var(--g-teal-2); }
+.article-meta a { color: var(--g-cyan-dk); }
+.article-meta a:hover { color: var(--g-teal); }
+.article-meta .dot { background: var(--g-red); }
+
+/* 标签：描边式小胶囊改成直角描边，白底 + 深青字 */
+.tag {
+  border: 1px solid var(--g-rule-2);
+  border-radius: 0;
+  background: #fff;
+  color: var(--g-teal-2);
+  box-shadow: none;
+}
+.tag:hover { border-color: var(--g-cyan-dk); color: var(--g-cyan-dk); background: var(--g-tint); }
+.tag.is-core::before,
+.tag.is-sub::before { background: var(--g-red); }
+.tag.is-sub::before { background: var(--g-cyan); }
+
+.article-foot { border-top: var(--g-hair) solid var(--g-rule); }
+
+/* 上下篇：白底卡片 + 发丝线 */
+.post-nav a {
+  border: 1px solid var(--g-rule);
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+}
+.post-nav a:hover {
+  border-color: var(--g-cyan-dk);
+  background: var(--g-tint);
+  transform: none;              /* 几何皮肤不做位移，靠边框与底色表达悬停 */
+}
+.post-nav .pn-dir { color: var(--g-mute); }
+.post-nav .pn-title { color: var(--g-ink); }
+
+/* ------------------------------------------------------------
+   7. 评论区占位
+   ------------------------------------------------------------ */
+.comments-box {
+  border: 1px solid var(--g-rule);
+  border-radius: 0;
+  background: var(--g-paper);
+  box-shadow: none;
+}
+.comments-box .cb-title { color: var(--g-ink); }
+.comments-box p { color: var(--g-teal-2); }
+.comments-ways li { color: var(--g-teal-2); }
+.comments-ways li::before { color: var(--g-cyan-dk); }
+.comments-ways b { color: var(--g-teal); }
+.comments-skel .cs-av { background: var(--g-tint); }
+.comments-skel .cs-lines i { background: var(--g-tint); }
+.comments-skel li {
+  border: var(--g-hair) solid var(--g-rule);
+  border-radius: 0;
+  background: #fff;                 /* 深色版是半透明深底，白底上要清掉 */
+}
+.comments-skel .cs-av {
+  border: var(--g-hair) solid var(--g-rule-2);
+  /* 深色版是斜纹填充，白底上换成更淡的斜纹，保持"占位"语义 */
+  background:
+    repeating-linear-gradient(45deg, rgba(2, 132, 199, .14) 0 4px, transparent 4px 8px);
+}
+.comments-note { color: var(--g-mute); }
+.comments-note code {
+  border: 1px solid var(--g-rule);
+  border-radius: 0;
+  background: #fff;
+  color: var(--g-cyan-dk);
+}
+
+/* ------------------------------------------------------------
+   8. 空状态 / 软 404（文章不存在时的那一块）
+   ------------------------------------------------------------ */
+.empty,
+.notfound-box { color: var(--g-teal-2); }
+.empty-mark {
+  color: var(--g-mute-2);
+  border-color: var(--g-rule-2);
+  background: none;
+}
+.empty p { color: var(--g-teal-2); }
+.err-title { color: var(--g-ink); }
+.err-text { color: var(--g-teal-2); }
+.err-text code {
+  border: 1px solid var(--g-rule);
+  border-radius: 0;
+  background: var(--g-tint);
+  color: var(--g-cyan-dk);
+}
+
+/* 通用按钮（空状态里的"去看全部文章 / 回主界面"） */
+.btn {
+  border: 1px solid var(--g-rule-2);
+  border-radius: 0;
+  background: #fff;
+  color: var(--g-teal);
+  box-shadow: none;
+}
+.btn:hover { border-color: var(--g-cyan-dk); color: var(--g-cyan-dk); background: var(--g-tint); }
+.btn.is-primary {
+  background: var(--g-cyan-dk);
+  border-color: var(--g-cyan-dk);
+  color: #fff;
+}
+.btn.is-primary:hover { background: var(--g-teal-2); border-color: var(--g-teal-2); color: #fff; }
+
+/* ------------------------------------------------------------
+   9. 提示条（pages.js 的 Toast）
+   ------------------------------------------------------------ */
+/* 放在 geo.css 里了：归档页点"待定"栏目也会弹提示条，
+   它不属于文章页专有的一块。这里留个说明，避免以后有人再抄一份。 */

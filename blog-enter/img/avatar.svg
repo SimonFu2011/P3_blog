@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480" width="480" height="480"
+     role="img" aria-label="头像占位图">
+  <title>头像占位图</title>
+  <desc>与站点配色一致的极简几何占位图：同心圆弧、斜向细线、红色斜条与点阵。
+        在 about.html 里以圆形裁切显示；换成真实照片时直接替换本文件即可。</desc>
+  <defs>
+    <clipPath id="avClip"><circle cx="240" cy="240" r="240"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#avClip)">
+    <!-- 底：极浅的水色，与首屏水面之上那一层白呼应 -->
+    <rect width="480" height="480" fill="#f7fbfe"/>
+
+    <!-- 同心圆：与主界面的水波、表盘同一母题 -->
+    <g fill="none" stroke="#14536b" stroke-opacity=".28">
+      <circle cx="240" cy="252" r="196" stroke-width="1"/>
+      <circle cx="240" cy="252" r="146" stroke-width="1"/>
+      <circle cx="240" cy="252" r="96" stroke-width="1.4" stroke-opacity=".45"/>
+    </g>
+
+    <!-- 人形剪影：默认头像位，线条轮廓 + 极浅填充 -->
+    <circle cx="240" cy="196" r="58" fill="#eef7fc" stroke="#0b3446" stroke-opacity=".55" stroke-width="2"/>
+    <path d="M240 268c62 0 108 44 112 102H128c4-58 50-102 112-102Z"
+          fill="#eef7fc" stroke="#0b3446" stroke-opacity=".55" stroke-width="2"/>
+
+    <!-- 红色斜条：构成主义的重音，压在左侧 -->
+    <g fill="#ff1f3d">
+      <rect x="18" y="150" width="104" height="11" transform="skewY(-18)"/>
+      <rect x="18" y="184" width="72" height="11" transform="skewY(-18)" opacity=".7"/>
+      <rect x="18" y="218" width="44" height="11" transform="skewY(-18)" opacity=".4"/>
+    </g>
+
+    <!-- 贯穿的细线 -->
+    <g stroke="#0284c7" stroke-width="1.4">
+      <line x1="-30" y1="404" x2="510" y2="152"/>
+      <line x1="-30" y1="432" x2="510" y2="180" stroke-opacity=".45"/>
+    </g>
+
+    <!-- 点阵 -->
+    <g fill="#38bdf8" opacity=".7">
+      <circle cx="352" cy="330" r="2.6"/><circle cx="378" cy="330" r="2.6"/><circle cx="404" cy="330" r="2.6"/>
+      <circle cx="352" cy="356" r="2.6"/><circle cx="378" cy="356" r="2.6"/><circle cx="404" cy="356" r="2.6"/>
+      <circle cx="352" cy="382" r="2.6"/><circle cx="378" cy="382" r="2.6"/><circle cx="404" cy="382" r="2.6"/>
+    </g>
+
+    <!-- 底部标识 -->
+    <text x="240" y="448" text-anchor="middle"
+          font-family="Bahnschrift, 'Arial Black', sans-serif" font-size="20" font-style="italic"
+          font-weight="900" letter-spacing="5" fill="#0b6a97">AVATAR</text>
+  </g>
+</svg>

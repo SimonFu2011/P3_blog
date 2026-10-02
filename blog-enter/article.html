@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文章 — SIMON 的个人站</title>
+<meta name="description" content="文章详情。">
+<link rel="stylesheet" href="css/pages.css">
+<!-- 纯白极简皮肤：与"关于我 / 归档"同一套。geo.css 管页面骨架，
+     prose-light.css 管正文与文章页专有的块（正文/代码块/上下篇/评论区）。
+     顺序不能换：同权重靠后加载取胜。 -->
+<link rel="stylesheet" href="css/geo.css">
+<link rel="stylesheet" href="css/prose-light.css">
+</head>
+<body>
+
+<a class="skip" href="#main">跳到正文</a>
+
+<nav class="nav" id="nav" aria-label="站点导航">
+  <div class="nav-bar">
+    <a class="nav-brand" href="index.html">
+      <span class="nav-brand-name" data-site-name>SIMON 的个人站</span>
+      <span class="nav-brand-tag" data-site-sub>PERSONAL SITE</span>
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="navList">
+      <span class="nt-bars" aria-hidden="true"><i></i><i></i></span>
+      <span class="nt-text-closed">MENU</span>
+      <span class="nt-text-open">CLOSE</span>
+    </button>
+  </div>
+
+  <ul class="nav-list" id="navList">
+    <li><a class="nav-link" href="about.html"><span class="nl-en">ABOUT</span><span class="nl-cn">关于我</span></a></li>
+    <li><a class="nav-link" href="archive.html" aria-current="page"><span class="nl-en">ARTICLES</span><span class="nl-cn">博客文章</span></a></li>
+    <li><a class="nav-link is-todo" href="index.html" data-todo="待定"><span class="nl-en">TBD</span><span class="nl-cn">待定</span></a></li>
+  </ul>
+
+  <div class="nav-foot">
+    <a class="nav-back" href="index.html">BACK TO ENTRY</a>
+    <span data-year>© 2026 SIMON 的个人站</span>
+  </div>
+</nav>
+<div class="nav-scrim" role="presentation"></div>
+
+<div class="page">
+  <main class="main" id="main">
+
+    <nav class="crumbs" aria-label="面包屑">
+      <a href="index.html">首页</a>
+      <span class="sep" aria-hidden="true">/</span>
+      <a href="archive.html">博客文章</a>
+      <span class="sep" aria-hidden="true">/</span>
+      <span id="crumbCat">—</span>
+    </nav>
+
+    <!-- ------------------------------------------------------------
+         文章外壳
+         ------------------------------------------------------------
+         #articleShell 默认 hidden，由 js/article.js 在成功注入正文后摘掉 ——
+         避免"JS 挂了但骨架还在"的半成品页面。param 是文章 slug，
+         走 ?slug=xxx，与归档页的链接一致。
+         ------------------------------------------------------------ -->
+    <article class="article" id="articleShell" hidden>
+
+      <header class="article-head">
+        <h1 class="article-title" id="articleTitle">—</h1>
+        <div class="article-meta">
+          <span>发布于 <time id="articleDate" datetime="">—</time></span>
+          <span class="dot" aria-hidden="true"></span>
+          <span>分类 <a id="articleCat" href="archive.html">—</a></span>
+          <span class="dot" aria-hidden="true"></span>
+          <span id="articleRead">—</span>
+        </div>
+        <div class="article-tags" id="articleTags"></div>
+      </header>
+
+      <!-- 正文由 JS 注入（html 片段，来源是本仓库自己的 js/posts.js） -->
+      <div class="prose" id="articleBody"></div>
+
+      <footer class="article-foot">
+        <div>
+          <span class="section-note">同一分类 / 标签下的其他文章见归档页</span>
+        </div>
+        <nav class="post-nav" id="postNav" aria-label="上下篇"></nav>
+      </footer>
+    </article>
+
+    <!-- ------------------------------------------------------------
+         评论区（占位）
+         ------------------------------------------------------------
+         没有接任何第三方评论系统：既没有后端，也不想在静态页里塞
+         跨域脚本。这里只给出结构占位与接入位置说明。
+         ------------------------------------------------------------ -->
+    <section class="comments" id="comments" aria-labelledby="commentsTitle">
+      <div class="comments-head">
+        <h2 class="section-title" id="commentsTitle">COMMENTS<span class="st-cn">评论</span></h2>
+        <span class="section-note">占位</span>
+      </div>
+      <div class="comments-box">
+        <p class="cb-title">评论区还没接上</p>
+        <p>
+          这里将是评论列表与输入框。本站是纯静态站点，没有服务端，
+          所以这一步需要外接一个评论服务 —— 常见做法有两类：
+        </p>
+        <ul class="comments-ways">
+          <li><b>托管型</b>：Giscus / utterances（基于 GitHub Issues，零后端）</li>
+          <li><b>自建型</b>：Waline / Artalk（需要一台小服务器与数据库）</li>
+        </ul>
+        <p class="comments-note">
+          接入位置：把下面这个挂载点换成评论服务的容器即可。
+          评论区脚本通常要放在正文之后，并且只在文章确实存在时加载。
+        </p>
+        <ul class="comments-skel" aria-hidden="true">
+          <li><span class="cs-av"></span><span class="cs-lines"><i></i><i></i></span></li>
+          <li><span class="cs-av"></span><span class="cs-lines"><i></i><i></i></span></li>
+        </ul>
+        <!-- 评论服务挂载点（当前为空） -->
+        <div id="commentsMount" data-comments-slot="giscus|waline|artalk"></div>
+      </div>
+    </section>
+
+    <!-- 文章不存在 / 参数缺失时的落点，由 JS 填充。
+         标题用 h2：本页的 h1 是文章标题，一页只能有一个 h1。 -->
+    <section class="empty notfound-box" id="notFound" hidden>
+      <div class="empty-mark">NOT FOUND</div>
+      <h2 class="err-title">这篇文章不存在</h2>
+      <p class="err-text" id="notFoundText">
+        链接里的 <code>slug</code> 参数没有对应的文章，可能已经被改名或删除。
+      </p>
+      <div class="err-actions">
+        <a class="btn is-primary" href="archive.html">去看全部文章</a>
+        <a class="btn" href="index.html">回主界面</a>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <span class="f-brand" data-site-name>SIMON 的个人站</span>
+    <span>落水而入 · 静态站点</span>
+    <span class="f-right"><span data-foot-note>按 ESC 回主界面</span> · © <span data-year>2025</span></span>
+  </footer>
+</div>
+
+<script src="js/data.js" defer></script>
+<script src="js/posts.js" defer></script>
+<script src="js/article.js" defer></script>
+<script src="js/pages.js" defer></script>
+</body>
+</html>

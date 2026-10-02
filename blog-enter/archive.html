@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>博客文章 — 归档</title>
+<meta name="description" content="全部文章的归档：按分类与标签筛选，或切换到按年月排列的时间线视图。">
+<link rel="stylesheet" href="css/pages.css">
+<link rel="stylesheet" href="css/geo.css">
+</head>
+<body>
+
+<a class="skip" href="#main">跳到正文</a>
+
+<nav class="nav" id="nav" aria-label="站点导航">
+  <div class="nav-bar">
+    <a class="nav-brand" href="index.html">
+      <span class="nav-brand-name" data-site-name>SIMON 的个人站</span>
+      <span class="nav-brand-tag" data-site-sub>PERSONAL SITE</span>
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="navList">
+      <span class="nt-bars" aria-hidden="true"><i></i><i></i></span>
+      <span class="nt-text-closed">MENU</span>
+      <span class="nt-text-open">CLOSE</span>
+    </button>
+  </div>
+
+  <ul class="nav-list" id="navList">
+    <li><a class="nav-link" href="about.html"><span class="nl-en">ABOUT</span><span class="nl-cn">关于我</span></a></li>
+    <li><a class="nav-link" href="archive.html" aria-current="page"><span class="nl-en">ARTICLES</span><span class="nl-cn">博客文章</span></a></li>
+    <li><a class="nav-link is-todo" href="index.html" data-todo="待定"><span class="nl-en">TBD</span><span class="nl-cn">待定</span></a></li>
+  </ul>
+
+  <div class="nav-foot">
+    <a class="nav-back" href="index.html">BACK TO ENTRY</a>
+    <span data-year>© 2026 SIMON 的个人站</span>
+  </div>
+</nav>
+<div class="nav-scrim" role="presentation"></div>
+
+<div class="page">
+  <main class="main" id="main">
+
+    <!-- ============================================================
+         首屏：与"关于我"同一套手法，几何装饰换一组母题
+         （同心圆 → 方框与对角线，暗示"编目 / 归档"）
+         ============================================================ -->
+    <header class="hero">
+      <div class="hero-inner">
+        <span class="page-kicker">ARCHIVE</span>
+        <h1 class="page-title">ALL<br>POSTS<span class="pt-cn">博 客 文 章</span></h1>
+        <p class="page-lead">
+          全部 <strong id="totalCount">0</strong> 篇。可按<strong>分类</strong>与<strong>标签</strong>交叉筛选，
+          也可以切到<strong>时间线</strong>视图，按年月倒着看。
+        </p>
+      </div>
+
+      <div class="hero-geo" aria-hidden="true">
+        <svg viewBox="0 0 420 420" fill="none" focusable="false">
+          <!-- 方框与对角线：编目的暗示 -->
+          <g stroke="var(--g-rule-2)" stroke-width="1">
+            <rect x="150" y="66" width="216" height="216"/>
+            <rect x="186" y="102" width="144" height="144"/>
+            <line x1="150" y1="66" x2="366" y2="282"/>
+            <line x1="366" y1="66" x2="150" y2="282"/>
+          </g>
+          <!-- 红色斜条 -->
+          <g fill="var(--g-red)">
+            <rect x="34" y="92" width="118" height="10" transform="skewY(-18)"/>
+            <rect x="34" y="124" width="84" height="10" transform="skewY(-18)" opacity=".72"/>
+            <rect x="34" y="156" width="50" height="10" transform="skewY(-18)" opacity=".42"/>
+          </g>
+          <!-- 贯穿细线 -->
+          <g stroke="var(--g-cyan)" stroke-width="1.2">
+            <line x1="-20" y1="368" x2="440" y2="124"/>
+            <line x1="-20" y1="394" x2="440" y2="150" opacity=".45"/>
+          </g>
+          <!-- 点阵 -->
+          <g fill="var(--g-cyan-soft)" opacity=".55">
+            <circle cx="176" cy="316" r="2"/><circle cx="198" cy="316" r="2"/><circle cx="220" cy="316" r="2"/>
+            <circle cx="176" cy="338" r="2"/><circle cx="198" cy="338" r="2"/><circle cx="220" cy="338" r="2"/>
+          </g>
+        </svg>
+      </div>
+    </header>
+
+    <!-- ============================================================
+         筛选：分类（单选）+ 标签（多选，可叠加）
+         维度之间是"与"；状态写进 URL 查询串，刷新与分享都能复现。
+         全部由 js/archive.js 渲染并接管。
+         ============================================================ -->
+    <section class="filters" aria-labelledby="filterTitle">
+      <h2 class="sr-only" id="filterTitle">筛选条件</h2>
+
+      <div class="filter-row">
+        <span class="filter-label" id="catLabel">分类</span>
+        <div class="chips" id="catChips" role="group" aria-labelledby="catLabel"></div>
+      </div>
+
+      <div class="filter-row">
+        <span class="filter-label" id="tagLabel">标签</span>
+        <div class="chips" id="tagChips" role="group" aria-labelledby="tagLabel"></div>
+      </div>
+
+      <div class="chip-row-aux">
+        <span class="filter-count" id="filterCount" role="status" aria-live="polite"></span>
+        <div class="view-switch" role="group" aria-label="视图切换">
+          <button class="view-btn" type="button" id="viewList" aria-pressed="true">列表</button>
+          <button class="view-btn" type="button" id="viewTimeline" aria-pressed="false">时间线</button>
+        </div>
+        <button class="filter-reset" type="button" id="filterReset" disabled>清空筛选</button>
+      </div>
+    </section>
+
+    <!-- 列表视图：编号寄存器 —— 序号 / 标题 / 日期 / 摘要 / 分类与标签 -->
+    <section class="section" id="listSection" aria-label="文章列表" style="margin-top:clamp(26px,4.4vh,48px)">
+      <div class="post-list" id="postList"></div>
+    </section>
+
+    <!-- 时间线视图：年（描边大字）→ 月 → 篇 -->
+    <section class="section" id="timelineSection" aria-label="按年月归档" style="margin-top:clamp(26px,4.4vh,48px)" hidden>
+      <div class="timeline" id="timeline"></div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <span class="f-brand" data-site-name>SIMON 的个人站</span>
+    <span>落水而入 · 静态站点</span>
+    <span class="f-right"><span data-foot-note>按 ESC 回主界面</span> · <span data-year>© 2026 SIMON 的个人站</span></span>
+  </footer>
+</div>
+
+<script src="js/data.js" defer></script>
+<script src="js/posts.js" defer></script>
+<script src="js/archive.js" defer></script>
+<script src="js/pages.js" defer></script>
+</body>
+</html>

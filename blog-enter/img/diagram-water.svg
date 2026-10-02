@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 760" width="1440" height="760"
+     role="img" aria-label="水面同心圆波纹示意图">
+  <title>水面同心圆波纹</title>
+  <desc>两层同心圆从同一落点扩散，外层与内层错开半个周期，波峰处标出干涉增强区。</desc>
+  <defs>
+    <linearGradient id="wBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d5f8a"/>
+      <stop offset=".45" stop-color="#0a4a6b"/>
+      <stop offset="1" stop-color="#052336"/>
+    </linearGradient>
+    <radialGradient id="wBloom" cx=".34" cy=".18" r=".8">
+      <stop offset="0" stop-color="#bff2ff" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#052336" stop-opacity="0"/>
+    </radialGradient>
+    <marker id="wArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 10 5 0 10z" fill="#ff1f3d"/>
+    </marker>
+    <clipPath id="wClip"><rect width="1440" height="760" rx="4"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#wClip)">
+    <rect width="1440" height="760" fill="url(#wBg)"/>
+    <rect width="1440" height="760" fill="url(#wBloom)"/>
+
+    <!-- 水面色带 -->
+    <g opacity=".28">
+      <rect y="120" width="1440" height="2" fill="#7dd3fc"/>
+      <rect y="300" width="1440" height="2" fill="#7dd3fc"/>
+      <rect y="520" width="1440" height="2" fill="#7dd3fc"/>
+    </g>
+
+    <!-- 内层波：波峰实线 -->
+    <g fill="none" stroke="#bff2ff" stroke-opacity=".85">
+      <circle cx="560" cy="400" r="60" stroke-width="3"/>
+      <circle cx="560" cy="400" r="120" stroke-width="2.6" stroke-opacity=".75"/>
+      <circle cx="560" cy="400" r="180" stroke-width="2.4" stroke-opacity=".65"/>
+      <circle cx="560" cy="400" r="240" stroke-width="2.2" stroke-opacity=".55"/>
+      <circle cx="560" cy="400" r="300" stroke-width="2" stroke-opacity=".45"/>
+    </g>
+    <!-- 外层波：错开半周期（r + 30），虚线 -->
+    <g fill="none" stroke="#35d3ff" stroke-opacity=".7" stroke-dasharray="14 12">
+      <circle cx="560" cy="400" r="90" stroke-width="2"/>
+      <circle cx="560" cy="400" r="150" stroke-width="2"/>
+      <circle cx="560" cy="400" r="210" stroke-width="2"/>
+      <circle cx="560" cy="400" r="270" stroke-width="2"/>
+      <circle cx="560" cy="400" r="330" stroke-width="2"/>
+    </g>
+
+    <!-- 落点 -->
+    <circle cx="560" cy="400" r="9" fill="#ff1f3d"/>
+    <circle cx="560" cy="400" r="20" fill="none" stroke="#ff1f3d" stroke-opacity=".6" stroke-width="2"/>
+
+    <!-- 干涉增强：两层波峰重合的位置 -->
+    <g fill="#ff1f3d" fill-opacity=".9">
+      <circle cx="560" cy="220" r="6"/>
+      <circle cx="560" cy="580" r="6"/>
+      <circle cx="740" cy="400" r="6"/>
+      <circle cx="380" cy="400" r="6"/>
+    </g>
+
+    <!-- 半径标注 -->
+    <g stroke="#7dd3fc" stroke-width="1.6" fill="none">
+      <line x1="560" y1="400" x2="860" y2="400" marker-end="url(#wArrow)" stroke="#ff1f3d"/>
+      <line x1="560" y1="400" x2="560" y2="70" marker-end="url(#wArrow)" stroke="#ff1f3d" stroke-dasharray="6 6"/>
+    </g>
+    <g font-family="Bahnschrift, Consolas, monospace" font-size="20" fill="#bff2ff">
+      <text x="700" y="388">r = 波前半径</text>
+      <text x="580" y="150">Δt 半周期 → 错开半个波长</text>
+    </g>
+
+    <g font-family="Bahnschrift, Consolas, monospace" font-size="19" fill="#ff9eb4">
+      <circle cx="960" cy="620" r="6"/><text x="980" y="627">两层波峰重合 = 干涉增强</text>
+    </g>
+
+    <text x="60" y="88" font-family="Bahnschrift, 'Arial Black', sans-serif" font-size="34"
+          font-style="italic" font-weight="900" fill="#e9f8ff">WATER RIPPLE</text>
+    <text x="62" y="122" font-family="Bahnschrift, Consolas, monospace" font-size="17"
+          letter-spacing="4" fill="#7dd3fc">同心圆波纹 / 非真实流体</text>
+  </g>
+</svg>

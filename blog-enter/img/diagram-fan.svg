@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 760" width="1440" height="760"
+     role="img" aria-label="扇形菜单几何示意图">
+  <title>扇形菜单的几何</title>
+  <desc>同一原点出发的三条射线，标出扇半径 r、相邻项角度差 Δθ，以及纵向间距 gapY
+        与字号的关系。右侧是"半径不足"时条目叠字的反例。</desc>
+  <defs>
+    <linearGradient id="fBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#083f5c"/>
+      <stop offset=".6" stop-color="#062f49"/>
+      <stop offset="1" stop-color="#041824"/>
+    </linearGradient>
+    <pattern id="fGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#7dd3fc" stroke-opacity=".12" stroke-width="1"/>
+    </pattern>
+    <marker id="fArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 10 5 0 10z" fill="#35d3ff"/>
+    </marker>
+    <marker id="fArrowR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 10 5 0 10z" fill="#ff1f3d"/>
+    </marker>
+    <clipPath id="fClip"><rect width="1440" height="760" rx="4"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#fClip)">
+    <rect width="1440" height="760" fill="url(#fBg)"/>
+    <rect width="1440" height="760" fill="url(#fGrid)"/>
+
+    <text x="60" y="80" font-family="Bahnschrift, 'Arial Black', sans-serif" font-size="32"
+          font-style="italic" font-weight="900" fill="#e9f8ff">FAN GEOMETRY</text>
+    <text x="62" y="112" font-family="Bahnschrift, Consolas, monospace" font-size="16"
+          letter-spacing="3.5" fill="#7dd3fc">3 项 · Δθ = 22° · r 与字号同比放大</text>
+
+    <!-- ================= 左：正确的几何 ================= -->
+    <g transform="translate(70,190)">
+      <!-- 弧线：条目落点所在的圆弧 -->
+      <path d="M40 300 A 372 372 0 0 0 560 40" fill="none" stroke="#7dd3fc"
+            stroke-opacity=".3" stroke-dasharray="8 8" stroke-width="1.6"/>
+
+      <!-- 三条射线 -->
+      <g stroke="#35d3ff" stroke-opacity=".55" stroke-width="1.4">
+        <line x1="0" y1="300" x2="345" y2="161"/>
+        <line x1="0" y1="300" x2="372" y2="300"/>
+        <line x1="0" y1="300" x2="345" y2="439"/>
+      </g>
+
+      <!-- 原点 -->
+      <circle cx="0" cy="300" r="8" fill="#ff1f3d"/>
+      <text x="14" y="330" font-family="Bahnschrift, Consolas, monospace" font-size="16" fill="#ff9eb4">原点</text>
+
+      <!-- 三项：位置与真实实现一致（rotate → translateX → 转回水平） -->
+      <g font-family="Bahnschrift, 'Arial Black', sans-serif" font-size="30" font-style="italic" font-weight="900">
+        <text x="345" y="161" fill="#e9f8ff">ABOUT</text>
+        <text x="372" y="300" fill="#ffffff">ARTICLES</text>
+        <text x="345" y="439" fill="#e9f8ff">TBD</text>
+      </g>
+
+      <!-- 半径标注 -->
+      <line x1="0" y1="300" x2="300" y2="300" stroke="#ff1f3d" stroke-width="1.8"
+            marker-end="url(#fArrowR)" stroke-dasharray="0"/>
+      <text x="150" y="288" font-family="Bahnschrift, Consolas, monospace" font-size="18" fill="#ff9eb4">r = 820 * spread</text>
+
+      <!-- 角度差标注 -->
+      <path d="M110 300 A 110 110 0 0 0 102 258" fill="none" stroke="#bff2ff" stroke-width="1.5"/>
+      <text x="112" y="246" font-family="Bahnschrift, Consolas, monospace" font-size="17" fill="#bff2ff">Δθ</text>
+
+      <!-- 纵向间距 -->
+      <g stroke="#ffd479" stroke-width="1.5">
+        <line x1="470" y1="161" x2="620" y2="161" stroke-dasharray="4 5"/>
+        <line x1="470" y1="300" x2="620" y2="300" stroke-dasharray="4 5"/>
+        <line x1="600" y1="161" x2="600" y2="300" marker-end="url(#fArrow)" stroke="#35d3ff"/>
+        <line x1="600" y1="300" x2="600" y2="439" marker-end="url(#fArrow)" stroke="#35d3ff"/>
+      </g>
+      <text x="612" y="222" font-family="Bahnschrift, Consolas, monospace" font-size="17" fill="#ffd479">gapY</text>
+      <text x="612" y="366" font-family="Bahnschrift, Consolas, monospace" font-size="17" fill="#ffd479">gapY</text>
+      <text x="470" y="500" font-family="Bahnschrift, Consolas, monospace" font-size="17" fill="#bff2ff">
+        gapY = r * |sin(θ+Δθ) - sin(θ)| ≥ 1.35 * 字号
+      </text>
+    </g>
+
+    <!-- ================= 右：反例 ================= -->
+    <g transform="translate(980,190)">
+      <rect x="-24" y="-58" width="430" height="560" fill="#041824" fill-opacity=".55"
+            stroke="#ff1f3d" stroke-opacity=".45" stroke-dasharray="7 7"/>
+      <text x="0" y="-24" font-family="Bahnschrift, 'Arial Black', sans-serif" font-size="20"
+            font-style="italic" font-weight="900" fill="#ff7085">半径没跟着字号放大</text>
+
+      <circle cx="0" cy="230" r="7" fill="#ff1f3d"/>
+      <g font-family="Bahnschrift, 'Arial Black', sans-serif" font-size="30" font-style="italic" font-weight="900">
+        <text x="150" y="150" fill="#e9f8ff" fill-opacity=".9">ABOUT</text>
+        <text x="176" y="188" fill="#ffffff">ARTICLES</text>
+        <text x="150" y="226" fill="#e9f8ff" fill-opacity=".9">TBD</text>
+      </g>
+      <text x="150" y="292" font-family="Bahnschrift, Consolas, monospace" font-size="16" fill="#ff9eb4">
+        三行叠在一起 → 读不出来
+      </text>
+      <text x="150" y="322" font-family="Bahnschrift, Consolas, monospace" font-size="16" fill="#bff2ff">
+        修法只有两条：
+      </text>
+      <text x="150" y="350" font-family="Bahnschrift, Consolas, monospace" font-size="16" fill="#bff2ff">
+        ① r 同比放大  ② Δθ 拉开
+      </text>
+    </g>
+  </g>
+</svg>

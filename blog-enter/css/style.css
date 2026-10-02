@@ -45,7 +45,9 @@
   --font-num: "Bahnschrift", "Consolas", monospace;
 
   --fall: 0;
-  --fan-origin-x: 34%;
+  /* 扇形原点：与 menu.js 的 originRatio 默认值保持一致（无角色模型时 0.42）。
+     脚本一定会重写它，这里的值只是"脚本挂掉时的兜底"。 */
+  --fan-origin-x: 42%;
   --fan-radius: 560px;
   --rot: 0deg;
   --spread: 1;
@@ -469,9 +471,24 @@ body.is-underwater .credit { color: rgba(190, 245, 255, .7); }
   pointer-events: none;
 }
 .fan.is-open { pointer-events: auto; }
-.fan-list { position: relative; }
+/* ------------------------------------------------------------
+   扇形原点的几何前提（别删）
+   ------------------------------------------------------------
+   .fan-list 里只有绝对定位的子项，所以它自身会塌成 0×0 —— 原点就是
+   它的左上角，也就是 .fan 的中心。这没问题，问题在于子项：
+   绝对定位 + width:auto 时，包含块宽度是 0，于是 width:auto 会退化成
+   shrink-to-fit(0) —— 浏览器按"可用宽度 0"算 max-content，再把内容
+   （超长的 nowrap 菜单文字）撑出来。结果是 .fan-link 变成一个 500px 宽
+   的块，右边缘直接顶到视口外（1440 下只剩 18px 余量）。
+
+   显式写 width: max-content，让每一项的宽度就等于它自己的文字：
+   layout() 里量到的 link 宽度才是真实字宽，roomForRadius 的推算才成立。
+   竖直方向靠 transform 链末尾的 translateY(-50%) 居中，与宽度无关。
+   ------------------------------------------------------------ */
+.fan-list { position: relative; width: 0; }
 .fan-item {
   position: absolute; left: 0; top: 0;
+  width: max-content;
   opacity: 0;
   will-change: transform, opacity;
   /* 落到弧线上：旋转 → 推出半径 → 转回水平 → 沿弧线微倾 */
@@ -535,10 +552,15 @@ body.is-underwater .credit { color: rgba(190, 245, 255, .7); }
   display: block;
   padding: .06em .5em .1em .38em;
   font-family: var(--font-en);
-  font-size: calc(clamp(28px, 3.2vw, 52px) * var(--font-scale, 1));
+  /* 同比增大（菜单从 7 项收到 3 项）：原来 28→52px、3.2vw，
+     现在 38→76px、4.4vw，整体 ×1.42 —— 与 menu.js 里 fanRadius 560→760
+     的 1.36 倍同量级，风格（叠印阴影 / 斜体 / 字重 / 字距）一字未动。 */
+  font-size: calc(clamp(38px, 4.4vw, 76px) * var(--font-scale, 1));
   font-weight: 900;
   font-style: italic;
-  letter-spacing: .01em;
+  /* letter-spacing 收到 0：8 个字母的 ARTICLES 在 63px 下光字距就要 30px，
+     窄一点点就能把右边界余量让出来（视觉上看不出差别）。 */
+  letter-spacing: 0;
   line-height: 1.02;
   white-space: nowrap;
   color: var(--teal);
@@ -550,15 +572,18 @@ body.is-underwater .credit { color: rgba(190, 245, 255, .7); }
     .098em .12em 0 rgba(255, 255, 255, .92);
   transition: color .22s ease, transform .3s cubic-bezier(.2, 1.3, .4, 1), text-shadow .22s ease;
 }
+/* 主标签（中文）：放大后不再只在选中项上出现 —— 三项菜单里，
+   非选中项只留英文会给"菜单项"和"说明文字"造成层次错位。
+   选中项仍靠 .85 → 1 的不透明度差与字号差区分。 */
 .fan-link .fi-jp {
-  display: none;
+  display: inline-block;
   font-family: var(--font-jp);
   font-style: normal;
-  font-size: .42em;
-  letter-spacing: .18em;
-  margin-left: .4em;
-  vertical-align: .42em;
-  opacity: .85;
+  font-size: .4em;
+  letter-spacing: .1em;
+  margin-left: .32em;
+  vertical-align: .4em;
+  opacity: .7;
 }
 .fan-item.is-active .fan-link {
   color: var(--ink);
@@ -575,7 +600,7 @@ body.is-underwater .credit { color: rgba(190, 245, 255, .7); }
   transform: skewX(-14deg);
   box-shadow: .1em 0 0 rgba(7, 21, 35, .9);
 }
-.fan-item.is-active .fan-link .fi-jp { display: inline-block; }
+.fan-item.is-active .fan-link .fi-jp { opacity: .95; }
 .fan-link.is-pulse { animation: linkPulse .42s cubic-bezier(.2, 1.4, .4, 1); }
 @keyframes linkPulse {
   0% { transform: translateX(-.1em) scale(1.06); }
@@ -622,16 +647,26 @@ body.is-underwater .credit { opacity: .8; }
 
 /* 窄屏：扇形改纵向堆叠，弧线错位保留放射的影子 */
 .fan.is-stacked {
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 92vw;
+  /* 堆叠态不能再用"单点 + translate(-50%,-50%)"：扇形原点是 left:44% 的一个
+     零点，条目横向错位时左半部分会直接跑出屏幕（390 宽下整条菜单被切掉一半）。
+     改成整宽容器，在容器内部居中。 */
+  left: 0; right: 0;
+  width: auto;
+  transform: translateY(-50%);
 }
 .fan.is-stacked .fan-list {
   display: flex; flex-direction: column; align-items: center;
+  /* width:0 是给桌面端"单点原点"用的（见 .fan-list 的注释），
+     堆叠态必须还回 auto —— 否则 flex 列的可用宽度是 0，
+     条目会被居中到 x=0，整条菜单跑出屏幕左侧。 */
+  width: auto;
   gap: clamp(2px, .6vh, 8px);
 }
 .fan.is-stacked .fan-item {
   position: relative;
+  left: auto; right: auto;
+  /* 桌面端的 width:max-content 在堆叠态要交还给 flex 的居中逻辑 */
+  width: auto;
   /* 默认也是收起的：is-stacked 原本无条件 opacity:1，会在窄屏的入场白场上
      把深色粗体菜单直接透在 entry 覆盖层后面（.entry 背景是透明的） */
   opacity: 0;
@@ -641,17 +676,17 @@ body.is-underwater .credit { opacity: .8; }
 .fan.is-stacked .fan-item.is-out { animation: none; opacity: 1; }
 .fan.is-stacked .fan-item.is-in { animation: none; opacity: 0; }
 .fan.is-stacked .fan-link {
-  font-size: clamp(26px, 7.6vw, 44px);
+  /* 窄屏堆叠：同样同比放大。
+     下限 44px 是按最宽的一条反推的 —— "博客文章"4 个全角字 + ARTICLES 8 字母
+     在 44px 下约 313px，390 宽的屏放得下（原来下限 30px 会小到看不清）。 */
+  font-size: clamp(44px, 11.2vw, 62px);
   padding-left: .3em;
 }
-/* 保留一点放射性：按序号做水平错位与轻微旋转 */
-.fan.is-stacked .fan-item:nth-child(1) .fan-link { transform: translateX(-26px) rotate(-3deg); }
-.fan.is-stacked .fan-item:nth-child(2) .fan-link { transform: translateX(-17px) rotate(-2deg); }
-.fan.is-stacked .fan-item:nth-child(3) .fan-link { transform: translateX(-9px)  rotate(-1deg); }
-.fan.is-stacked .fan-item:nth-child(4) .fan-link { transform: none; }
-.fan.is-stacked .fan-item:nth-child(5) .fan-link { transform: translateX(9px)   rotate(1deg); }
-.fan.is-stacked .fan-item:nth-child(6) .fan-link { transform: translateX(17px)  rotate(2deg); }
-.fan.is-stacked .fan-item:nth-child(7) .fan-link { transform: translateX(26px)  rotate(3deg); }
+/* 保留一点放射性：按序号做水平错位与轻微旋转。
+   条目变少（3 条）后错位量按比例收小，否则首尾会顶出屏幕。 */
+.fan.is-stacked .fan-item:nth-child(1) .fan-link { transform: translateX(-16px) rotate(-2deg); }
+.fan.is-stacked .fan-item:nth-child(2) .fan-link { transform: none; }
+.fan.is-stacked .fan-item:nth-child(3) .fan-link { transform: translateX(16px) rotate(2deg); }
 .fan.is-stacked .fan-item.is-active .fan-link { transform: translateX(0) scale(1.08); }
 .fan.is-stacked .fan-item.is-active .fan-link.is-pulse { animation: linkPulseStack .42s cubic-bezier(.2, 1.4, .4, 1); }
 @keyframes linkPulseStack {
@@ -1173,11 +1208,13 @@ body.is-page-hidden .bubble {
    角色已移除，扇形原点可以更自由地横向铺开。
    ============================================================ */
 @media (max-width: 1100px) {
-  :root { --fan-origin-x: 38%; }
-  .fan-link { font-size: clamp(26px, 3.6vw, 46px); }
+  /* 窄屏字号同比缩小，同时原点略右移（左右留白平衡）。
+     这两个值要与 menu.js 的 originRatio 上限配合看：脚本会按 0.40 写 inline 值。 */
+  :root { --fan-origin-x: 42%; }
+  .fan-link { font-size: clamp(32px, 4.6vw, 62px); }
 }
 @media (max-width: 900px) {
-  :root { --fan-origin-x: 36%; }
+  :root { --fan-origin-x: 44%; }
   .entry-inner { transform: translateY(-2vh); }
 
   /* 第六项第 3 条：移动端收成小钟按钮，点击展开；展开后是一块浮层，
