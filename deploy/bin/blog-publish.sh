@@ -44,16 +44,24 @@ mkdir -p "$WEB_ROOT"
 #                                不属于仓库内容，别让 --delete 抹掉
 # --delete 让 web 根目录与仓库严格一致（多余文件会被清掉）。
 #
-# 权限用 D2775：目录带 setgid 并给组写权限。
-#   · 普通 nginx 部署：根目录 blog:www-data，nginx 只读即可；
-#   · 宝塔面板部署：根目录必须是 www:www，发布用户 blog 靠 www 组拿到写权限。
-#   两种场景下 setgid 都无害，所以统一用这一套。
+# 两个踩过的坑，改法都写在下面：
+#
+# 1) **不要用 -a**。-a 含 -p -o -g，rsync 会去改站点目录（属主 www，不是
+#    blog）的权限与属组；发布用户不是属主 → "chgrp ...: Operation not
+#    permitted" 并以 exit 23 结束。这里只同步内容与文件时间，权限靠站点
+#    目录的 setgid + umask 自然继承。
+#
+# 2) ***.md 必须用 "-s" 修饰符**（sender-side only）。普通 --exclude 在
+#    接收端同时起"保护"作用：文件不上传，但也不许删。于是历史遗留的
+#    ADMIN.md 永远删不掉，它所在的目录也就永远删不掉 —— 实测报
+#    "cannot delete non-empty directory: blog-enter"，而那个目录里正好
+#    残留着一份管理端文档、可被公网直接读取。-s 让排除规则只作用于发送端。
 # ------------------------------------------------------------
-rsync -a --delete --chmod=D2775,F644 \
+rsync -rlt --omit-dir-times --delete \
   --exclude '/server/' \
   --exclude '/admin/' \
   --exclude '/tests/' \
-  --exclude '*.md' \
+  --filter='-s *.md' \
   --exclude '.admin/' \
   --exclude '.git*' \
   --exclude '.user.ini' \
