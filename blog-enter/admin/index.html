@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>文章管理 — 本地</title>
+<link rel="stylesheet" href="/css/pages.css">
+<link rel="stylesheet" href="/css/geo.css">
+<link rel="stylesheet" href="/_admin/admin.css">
+</head>
+<body class="admin-body">
+
+<!-- ============================================================
+     为什么管理页单独一套布局、不复用站点的侧边栏：
+     它是"工具"不是"页面"。站点那套导航里绝不能出现指向这里的链接 ——
+     这一页只在本地服务器的路由里存在，公开产物里根本没有它。
+     ============================================================ -->
+
+<header class="ad-top">
+  <div class="ad-brand">
+    <span class="ad-kicker">LOCAL ADMIN</span>
+    <strong>文章管理</strong>
+    <span class="ad-file" id="postsFile">js/posts.js</span>
+  </div>
+
+  <div class="ad-top-status">
+    <span class="ad-pill" id="authPill" data-state="unknown">检查认证…</span>
+    <span class="ad-pill" id="gitPill" data-state="unknown">检查 git…</span>
+    <span class="ad-pill ad-pill-count" id="countPill">— 篇</span>
+    <button type="button" class="ad-btn" id="reloadBtn" title="重新从磁盘读取">重新载入</button>
+  </div>
+</header>
+
+<!-- 口令门：只有设了口令才会显示 -->
+<section class="ad-gate" id="gate" hidden>
+  <div class="ad-gate-box">
+    <h2>输入访问口令</h2>
+    <p class="ad-gate-note">
+      这个口令是本机管理接口的第二把锁（第一把是"只监听 127.0.0.1 + 同源判定"）。
+      口令以 PBKDF2-SHA256 哈希保存在 <code>.admin/passphrase.json</code>，不存明文。
+    </p>
+    <form id="gateForm" autocomplete="off">
+      <input type="password" id="gatePass" placeholder="口令" autocomplete="current-password" required>
+      <button type="submit" class="ad-btn is-primary">解锁</button>
+    </form>
+    <p class="ad-gate-error" id="gateError" role="alert"></p>
+    <p class="ad-gate-hint">
+      忘记了？在终端执行：<code>node blog-enter/server/dev-server.mjs --clear-pass</code>
+    </p>
+  </div>
+</section>
+
+<main class="ad-main" id="app" hidden>
+
+  <!-- ---------------- 左：文章列表 ---------------- -->
+  <aside class="ad-list">
+    <div class="ad-list-head">
+      <input type="search" id="search" placeholder="搜索标题 / slug / 标签" aria-label="搜索文章">
+      <button type="button" class="ad-btn is-primary" id="newBtn">＋ 新建</button>
+    </div>
+
+    <div class="ad-filter">
+      <label class="ad-check"><input type="checkbox" id="showDrafts" checked> 显示草稿</label>
+      <span class="ad-count" id="listCount"></span>
+    </div>
+
+    <ul class="ad-posts" id="postList" role="list"></ul>
+
+    <div class="ad-list-foot">
+      <div class="ad-dirty" id="dirtyBox" hidden></div>
+      <button type="button" class="ad-btn" id="commitBtn">提交到 git</button>
+      <button type="button" class="ad-btn is-quiet" id="moreBtn">备份 / 图片 / 日志</button>
+    </div>
+  </aside>
+
+  <!-- ---------------- 右：编辑区 ---------------- -->
+  <section class="ad-editor" id="editor">
+
+    <div class="ad-empty" id="editorEmpty">
+      <div class="ad-empty-mark">NO SELECTION</div>
+      <h2>左边选一篇，或者新建一篇</h2>
+      <p>
+        这里改的是唯一真源 <code>js/posts.js</code>。保存时只替换这一篇的源码区间，
+        其余文章逐字节不动；写盘前先备份，写盘后立刻重新求值复核。
+      </p>
+    </div>
+
+    <form class="ad-form" id="form" hidden autocomplete="off">
+      <div class="ad-form-head">
+        <h2 id="formTitle">编辑文章</h2>
+        <div class="ad-form-head-actions">
+          <span class="ad-saved" id="savedHint" role="status" aria-live="polite"></span>
+          <button type="button" class="ad-btn is-quiet" id="deleteBtn">删除</button>
+          <button type="submit" class="ad-btn is-primary" id="saveBtn">保存 <kbd>Ctrl+S</kbd></button>
+        </div>
+      </div>
+
+      <div class="ad-errors" id="errors" role="alert" hidden></div>
+
+      <div class="ad-grid">
+        <label class="ad-field ad-field-wide">
+          <span>标题 <em>必填</em></span>
+          <input type="text" id="fTitle" maxlength="120" required>
+        </label>
+
+        <label class="ad-field">
+          <span>slug <em>URL 里用的稳定标识</em></span>
+          <input type="text" id="fSlug" pattern="[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?" spellcheck="false">
+          <small id="slugHint">改 slug 会自动把旧地址记成别名，老链接不会失效</small>
+        </label>
+
+        <label class="ad-field">
+          <span>日期 <em>YYYY-MM-DD</em></span>
+          <input type="date" id="fDate">
+        </label>
+
+        <label class="ad-field">
+          <span>分类</span>
+          <input type="text" id="fCategory" maxlength="24" list="catList">
+          <datalist id="catList"></datalist>
+        </label>
+
+        <label class="ad-field">
+          <span>标签 <em>逗号分隔</em></span>
+          <input type="text" id="fTags" list="tagList">
+          <datalist id="tagList"></datalist>
+        </label>
+
+        <label class="ad-field ad-field-wide">
+          <span>摘要 <em>归档页显示的一两句话</em></span>
+          <textarea id="fExcerpt" rows="2" maxlength="240"></textarea>
+        </label>
+
+        <label class="ad-field ad-checkline">
+          <input type="checkbox" id="fDraft">
+          <span>草稿（归档页不列出，详情页需要 <code>?preview=<span id="draftSlug">slug</span></code> 才能看）</span>
+        </label>
+      </div>
+
+      <!-- 正文：源码就是真源。刻意不做 Markdown 隐式转换 —— -->
+      <!-- 那些转换会在"我写的"和"页面渲染的"之间插一层，出问题时最难查。 -->
+      <div class="ad-body-head">
+        <span class="ad-body-label">正文 <em>HTML 片段</em></span>
+        <div class="ad-tools" id="tools">
+          <button type="button" class="ad-tool" data-wrap="p">段落</button>
+          <button type="button" class="ad-tool" data-wrap="h2">小标题</button>
+          <button type="button" class="ad-tool" data-wrap="ul">列表</button>
+          <button type="button" class="ad-tool" data-wrap="blockquote">引用</button>
+          <button type="button" class="ad-tool" data-wrap="pre">代码块</button>
+          <button type="button" class="ad-tool" data-wrap="figure">配图</button>
+          <button type="button" class="ad-tool" data-wrap="a">链接</button>
+          <button type="button" class="ad-tool is-accent" id="uploadBtn">上传图片</button>
+          <input type="file" id="fileInput" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" multiple hidden>
+        </div>
+      </div>
+
+      <div class="ad-split">
+        <div class="ad-body-wrap" id="bodyWrap">
+          <textarea id="fBody" spellcheck="false" placeholder="&lt;p&gt;正文段落…&lt;/p&gt;"></textarea>
+          <div class="ad-drop" id="dropHint" hidden>松手即上传图片</div>
+        </div>
+        <div class="ad-preview-wrap">
+          <div class="ad-preview-head">
+            <span>预览</span>
+            <span class="ad-preview-note">与详情页同一份 CSS</span>
+          </div>
+          <!-- sandbox 里**没有** allow-scripts：预览区里的任何标记都不会执行。
+               同时也不能用 allow-same-origin（两者同时给等于没沙箱），
+               所以样式不靠 <link> 而是由 admin.js 取来内联进去。 -->
+          <iframe id="preview" title="正文预览" sandbox src="about:blank" loading="lazy"></iframe>
+        </div>
+      </div>
+    </form>
+  </section>
+</main>
+
+<!-- ---------------- 抽屉：备份 / 图片 / 日志 ---------------- -->
+<div class="ad-drawer" id="drawer" hidden>
+  <div class="ad-drawer-scrim" id="drawerScrim"></div>
+  <aside class="ad-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+    <header>
+      <h2 id="drawerTitle">备份 / 图片 / 提交记录</h2>
+      <button type="button" class="ad-btn is-quiet" id="drawerClose">关闭</button>
+    </header>
+    <div class="ad-drawer-body">
+      <section>
+        <h3>posts.js 备份</h3>
+        <p class="ad-note">每次保存前都会自动备份一份，保留最近 20 份。恢复会覆盖当前文件（恢复前也会再备份一次）。</p>
+        <ul class="ad-rows" id="backupList"></ul>
+      </section>
+      <section>
+        <h3>回收站（被删除的文章）</h3>
+        <p class="ad-note">删除文章不真删，内容以 JSON 存在 <code>.admin/trash/</code>，可以直接复制回去。</p>
+        <ul class="ad-rows" id="trashList"></ul>
+      </section>
+      <section>
+        <h3>已上传图片</h3>
+        <ul class="ad-rows ad-rows-img" id="imageList"></ul>
+      </section>
+      <section>
+        <h3>最近提交</h3>
+        <ul class="ad-rows" id="gitLog"></ul>
+      </section>
+    </div>
+  </aside>
+</div>
+
+<div class="ad-toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<!-- 令牌不通过 script 标签注入：那条路由（/_admin/token.js）在未解锁时
+     会返回 401，而浏览器仍会把它当脚本解析，控制台里于是留一条无意义的
+     语法错误，反而让人以为页面坏了。
+     现在统一由 admin.js 在解锁成功后向 /api/session 取一次令牌 ——
+     来源只有一个，令牌也不会被写进 HTML。
+     （注释里刻意不写完整的 script 标签，否则任何按标签扫描的检查都会误判。） -->
+<script src="/js/pages.js" defer></script>
+<script src="/_admin/admin.js" defer></script>
+</body>
+</html>
