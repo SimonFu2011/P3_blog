@@ -100,13 +100,14 @@
         <!-- 3D 舞台：perspective 只在这里声明 -->
         <div class="dial-scene" id="dialScene">
 
-          <!-- 外层时钟层：背景 / 表盘纹理 / 刻度 / 指针 / 阴影线 / 外围光圈 -->
+          <!-- 外层时钟层：金属表圈 / 表盘 / 刻度 / 指针 / 阴影线 / 外围光圈 -->
           <div class="dial-clock" id="dialClock">
             <!-- 爆开光环：与扇形菜单的爆开同一瞬间启动 -->
-            <span class="dock-burst" aria-hidden="true"><i></i><i></i></span>
-
-            <!-- 表盘纹理层（CSS 画）：底色、同心刻线、放射细线、斜向排线 -->
+            <span class="dock-burst" aria-hidden="true"><i></i><i></i><i></i></span>
+            <!-- 表盘纹理层（CSS 画）：同心刻线、放射细线、斜向排线 -->
             <span class="dial-texture" aria-hidden="true"></span>
+            <!-- 入场时扫过表圈的高光（只在首次入水播一次，JS 摘 .is-first） -->
+            <span class="dial-sweep" aria-hidden="true"></span>
 
             <svg class="dial-svg" viewBox="0 0 240 240" aria-hidden="true" focusable="false">
               <defs>
@@ -115,77 +116,136 @@
                   <rect width="5" height="5" fill="#f2f0ea"></rect>
                   <line x1="0" y1="0" x2="0" y2="5" stroke="#0d0d0f" stroke-width="1.7"></line>
                 </pattern>
-                <!-- 阴影线图案：细密斜排线。左上分段色环用它填充，
-                     纹理跟旁边字体的冷色微光走，不再是纯黑网点 -->
                 <pattern id="dialLineHatch" width="4" height="4" patternUnits="userSpaceOnUse"
                          patternTransform="rotate(45)">
                   <rect width="4" height="4" fill="#0b1a2b"></rect>
                   <line x1="0" y1="0" x2="0" y2="4" stroke="rgba(125, 211, 252, .55)"
                         stroke-width="1"></line>
                 </pattern>
-                <!-- 同心圆细线：缩到实际尺寸后是"唱片刻纹"级的微纹理 -->
                 <pattern id="dialRings" width="2.5" height="2.5" patternUnits="userSpaceOnUse">
                   <circle cx="1.25" cy="1.25" r=".75" fill="none"
                           stroke="rgba(125, 211, 252, .5)" stroke-width=".34"></circle>
                 </pattern>
-                <!-- 方盘要挖掉 r<92 的圆：否则这块不透明的黑方会盖住下面的黑胶 -->
-                <mask id="dialPlateMask">
-                  <rect x="0" y="0" width="240" height="240" fill="#ffffff"></rect>
-                  <circle cx="120" cy="120" r="92" fill="#000000"></circle>
-                </mask>
                 <!-- 表盘挖掉 r<46 的圆：中心整块留给黑胶 -->
                 <mask id="dialFaceMask">
                   <rect x="0" y="0" width="240" height="240" fill="#ffffff"></rect>
                   <circle cx="120" cy="120" r="46" fill="#000000"></circle>
                 </mask>
+
+                <!-- 金属表圈：左上高光 → 右下暗部，再叠一圈细密的明暗循环
+                     做出拉丝金属的观感（线性渐变叠在同心环上比纯灰更"有金属味"） -->
+                <linearGradient id="dialBezelMetal" x1="18%" y1="0%" x2="82%" y2="100%">
+                  <stop offset="0" stop-color="#f4f8fb"></stop>
+                  <stop offset=".14" stop-color="#9db4c6"></stop>
+                  <stop offset=".3" stop-color="#e2ebf1"></stop>
+                  <stop offset=".46" stop-color="#7b93a4"></stop>
+                  <stop offset=".6" stop-color="#c2d2dd"></stop>
+                  <stop offset=".76" stop-color="#5f7889"></stop>
+                  <stop offset=".9" stop-color="#9fb3c2"></stop>
+                  <stop offset="1" stop-color="#465c6b"></stop>
+                </linearGradient>
+                <radialGradient id="dialBezelSheen" cx="34%" cy="26%" r="72%">
+                  <stop offset="0" stop-color="#dff2ff" stop-opacity=".85"></stop>
+                  <stop offset=".45" stop-color="#8fd3f4" stop-opacity=".22"></stop>
+                  <stop offset="1" stop-color="#0a2135" stop-opacity=".5"></stop>
+                </radialGradient>
+
+                <!-- 表盘底：米白盘面 + 从左上到右下的金属冷光过渡 -->
+                <linearGradient id="dialFaceMetal" x1="12%" y1="0%" x2="88%" y2="100%">
+                  <stop offset="0" stop-color="#ffffff"></stop>
+                  <stop offset=".42" stop-color="#f3f0e9"></stop>
+                  <stop offset="1" stop-color="#dbe3e8"></stop>
+                </linearGradient>
+
+                <!-- 厚度侧面：从盘面底部往下压暗 -->
+                <linearGradient id="dialBplate" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0" stop-color="#27455c"></stop>
+                  <stop offset=".55" stop-color="#132b3e"></stop>
+                  <stop offset="1" stop-color="#040b12"></stop>
+                </linearGradient>
+
+                <!-- 盘面内阴影：上缘 + 两侧的投影，做出"指针沉在盘里"的凹陷感。
+                     userSpaceOnUse + 用户坐标，跟随 viewBox 缩放，不需要额外缩放层 -->
+                <clipPath id="dialInnerClip">
+                  <circle cx="120" cy="121" r="93"></circle>
+                </clipPath>
+                <filter id="dialInnerShadow" x="-25%" y="-25%" width="150%" height="150%"
+                        color-interpolation-filters="sRGB">
+                  <feDropShadow dx="0" dy="5" stdDeviation="6"
+                                flood-color="#03131f" flood-opacity=".6"></feDropShadow>
+                  <feDropShadow dx="0" dy="1.5" stdDeviation="2"
+                                flood-color="#03131f" flood-opacity=".45"></feDropShadow>
+                </filter>
               </defs>
 
-              <!-- 黑方盘（挖空的方环，只留四角）+ 天蓝描边 -->
-              <rect class="dial-plate" x="6" y="6" width="228" height="228"
-                    mask="url(#dialPlateMask)"></rect>
-              <rect class="dial-plate-edge" x="6" y="6" width="228" height="228"></rect>
+              <!-- ① 厚度侧面：被盘面整体压住，只有倾斜时才从上缘露出来 -->
+              <circle class="dial-bplate" cx="120" cy="128" r="114.5"></circle>
 
-              <!-- 表盘底色 + 阴影纹理（r=72、线宽 40 → 覆盖 52~92；中心留给黑胶） -->
-              <circle class="dial-face" cx="120" cy="120" r="72"
-                      mask="url(#dialFaceMask)"></circle>
-              <circle class="dial-face-rings" cx="120" cy="120" r="72"
-                      mask="url(#dialFaceMask)"></circle>
-              <circle class="dial-face-glow" cx="120" cy="120" r="72"
-                      mask="url(#dialFaceMask)"></circle>
+              <!-- ② 金属表圈：r 96~120（外径占容器 83%），叠高光与冷色环境光 -->
+              <circle class="dial-bezel" cx="120" cy="120.5" r="112" fill="none"
+                      stroke="url(#dialBezelMetal)" stroke-width="16"></circle>
+              <circle class="dial-bezel-sheen" cx="120" cy="120.5" r="112" fill="none"
+                      stroke="url(#dialBezelSheen)" stroke-width="16"></circle>
+              <!-- 滚花细齿：JS 生成，只在表圈带内，做出机械倒角 -->
+              <g class="dial-knurl" mask="url(#dialFaceMask)"></g>
+              <!-- 倒角高光（外缘）与倒角阴影（内缘）：一明一暗才是"圆弧倒角" -->
+              <circle class="dial-bezel-hi" cx="120" cy="120.5" r="119.6" fill="none"></circle>
+              <circle class="dial-bezel-lo" cx="120" cy="120.5" r="104.2" fill="none"></circle>
 
-              <!-- 四象限分段色环（r 92~108） -->
-              <path class="dial-q dial-q1" d="M120 20 A100 100 0 0 1 220 120"></path>
-              <path class="dial-q dial-q2" d="M220 120 A100 100 0 0 1 120 220"></path>
-              <path class="dial-q dial-q3" d="M120 220 A100 100 0 0 1 20 120"></path>
-              <path class="dial-q dial-q4" d="M20 120 A100 100 0 0 1 120 20"></path>
+              <!-- ③ 盘面：r 51~93（下移 1 单位 = 表圈在上的光学厚度）。
+                     94 比表圈内缘 96 略大，让内阴影压出一圈凹陷 -->
+              <circle class="dial-face" cx="120" cy="121" r="74" fill="none"
+                      stroke="url(#dialFaceMetal)" stroke-width="44"></circle>
+              <!-- 表盘冷色微光：与外圈天蓝呼应，中心淡出 -->
+              <circle class="dial-face-glow" cx="120" cy="121" r="74" fill="none"
+                      stroke="rgba(56, 189, 248, .4)" stroke-width="44"></circle>
+              <!-- 同心刻线图案（pattern 为用户坐标，跟 viewBox 一起缩放） -->
+              <circle class="dial-face-rings" cx="120" cy="121" r="74" fill="none"
+                      stroke="url(#dialRings)" stroke-width="44"></circle>
+              <!-- 内阴影：把盘面到表圈的那一圈压暗，做出下沉 -->
+              <g clip-path="url(#dialInnerClip)">
+                <circle class="dial-shadow-rim" cx="120" cy="120" r="99" fill="none"
+                        filter="url(#dialInnerShadow)"></circle>
+              </g>
 
-              <!-- 表盘与色环之间的细分隔环：否则右上角的米白色环会和米白表盘连成一片 -->
-              <circle class="dial-seam" cx="120" cy="120" r="92"></circle>
-              <!-- 盘面内缘细亮圈：冷色微光，和旁边天蓝字呼应 -->
-              <circle class="dial-rim" cx="120" cy="120" r="52"></circle>
+              <!-- ④ 四象限分段色环（r 86、线宽 14 → 覆盖 79~93） -->
+              <path class="dial-q dial-q1" d="M120 35 A85 85 0 0 1 205 120"></path>
+              <path class="dial-q dial-q2" d="M205 120 A85 85 0 0 1 120 205"></path>
+              <path class="dial-q dial-q3" d="M120 205 A85 85 0 0 1 35 120"></path>
+              <path class="dial-q dial-q4" d="M35 120 A85 85 0 0 1 120 35"></path>
+              <!-- 色环两侧的分隔细线：上缘亮、下缘暗，让色环像嵌进盘面的嵌条 -->
+              <circle class="dial-seam-hi" cx="120" cy="120" r="95.6" fill="none"></circle>
+              <circle class="dial-seam-lo" cx="120" cy="120" r="79.2" fill="none"></circle>
+              <!-- 盘面内缘圈：黑胶就坐在它里面，给唱片一圈冷光底衬 -->
+              <circle class="dial-rim" cx="120" cy="120" r="51.5" fill="none"></circle>
 
-              <!-- 放射状阴影线（r 54~90）：JS 按 3° 一根生成，只压一道极淡的机械质感 -->
+              <!-- 放射状阴影线（r 53~90）：JS 按 3° 生成，只压一道极淡的机械质感 -->
               <g class="dial-rails" mask="url(#dialFaceMask)"></g>
 
               <!-- 构成主义对角线 + 两个角上的短棒 -->
-              <line class="dial-diagonal" x1="52" y1="188" x2="188" y2="52"></line>
-              <line class="dial-corner-red" x1="16" y1="42" x2="42" y2="16"></line>
-              <line class="dial-corner-sky" x1="198" y1="224" x2="224" y2="198"></line>
+              <line class="dial-diagonal" x1="56" y1="185" x2="184" y2="56"></line>
+              <line class="dial-corner-red" x1="52" y1="54" x2="66" y2="40"></line>
+              <line class="dial-corner-sky" x1="176" y1="198" x2="190" y2="184"></line>
 
-              <!-- 罗马数字由 JS 生成（r=75） -->
+              <!-- 罗马数字由 JS 生成（r=76） -->
               <g id="dialNumerals" class="dial-numerals"></g>
 
-              <!-- 时针 = 红楔（构成主义主角）；分针 = 带黑边的米白细条 -->
+              <!-- 时针 / 分针：造型参照附图的老式镂空指针（卷草纹 + 长尾配重） -->
               <g id="dialHour" class="dial-hand-h">
-                <polygon class="dial-wedge" points="114.6,120 125.4,120 120,54"></polygon>
+                <path class="dial-hand-shape" transform="translate(0 -6)" d="M120 58.08 C117.94 68.4 115.18 78.38 112.43 84.05 C109.34 90.42 104.69 93.17 99.53 92.91 C94.8 92.65 90.76 90.16 88.7 85.94 C85.6 79.41 88.01 72.18 92.82 66.51 C97.64 60.83 103.23 56.27 107.44 52.75 C109.85 50.68 112.95 50.34 115.01 52.06 C116.9 53.61 119.14 55.84 120 58.08 Z M120 58.08 C122.06 68.4 124.82 78.38 127.57 84.05 C130.66 90.42 135.31 93.17 140.47 92.91 C145.2 92.65 149.24 90.16 151.3 85.94 C154.4 79.41 151.99 72.18 147.18 66.51 C142.36 60.83 136.77 56.27 132.56 52.75 C130.15 50.68 127.05 50.34 124.99 52.06 C123.1 53.61 120.86 55.84 120 58.08 Z"></path>
+                <circle class="dial-hand-boss" cx="120" cy="120" r="9.6"></circle>
+                <circle class="dial-hand-pierce" cx="120" cy="120" r="3.6"></circle>
               </g>
               <g id="dialMin" class="dial-hand-m">
-                <rect class="dial-bar" x="118.3" y="54" width="3.4" height="72"></rect>
+                <path class="dial-hand-shape" transform="translate(0 -6)" d="M120 114.5 L120 26.5 C120 22.4 121.9 19.2 124.5 18.1 L127.6 16.8 L126.6 39 L126 114.5 Z M120 114.5 L120 26.5 C120 22.4 118.1 19.2 115.5 18.1 L112.4 16.8 L113.4 39 L114 114.5 Z M120 133 L120 128.5 C117.4 128.5 114.8 127.3 112.9 124.9 C110.2 121.5 108.7 116.4 108.2 110.8 C107.9 107.8 109.3 105.5 111.9 104.9 C114.5 104.3 117.4 105.8 118.4 108.4 C119.1 110.2 120 111.4 120 111.4 Z M120 133 L120 128.5 C122.6 128.5 125.2 127.3 127.1 124.9 C129.8 121.5 131.3 116.4 131.8 110.8 C132.1 107.8 130.7 105.5 128.1 104.9 C125.5 104.3 122.6 105.8 121.6 108.4 C120.9 110.2 120 111.4 120 111.4 Z"></path>
+                <circle class="dial-hand-boss" cx="120" cy="120" r="7.8"></circle>
+                <circle class="dial-hand-pierce" cx="120" cy="120" r="2.8"></circle>
               </g>
               <circle class="dial-pivot" cx="120" cy="120" r="6.4"></circle>
               <rect class="dial-pivot-dot" x="116" y="116" width="8" height="8"
                     transform="rotate(45 120 120)"></rect>
             </svg>
+          </div>
           </div>
 
           <!-- 黑胶层：与外层时钟同级 → 可独立做反向倾斜；

@@ -6,7 +6,9 @@ const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const PORT = 9341;
 const chrome = spawn(CHROME, [
   '--headless=new', '--remote-debugging-port=' + PORT, '--remote-allow-origins=*',
-  '--disable-gpu', '--hide-scrollbars', '--window-size=430,932',
+  '--disable-gpu',
+  '--no-sandbox',
+  '--disable-dev-shm-usage', '--hide-scrollbars', '--window-size=430,932',
   '--user-data-dir=D:\\DS\\.preview\\cp-mobile', 'about:blank'
 ], { stdio: 'ignore' });
 

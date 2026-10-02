@@ -20,8 +20,9 @@
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const ROMAN = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
   const CX = 120, CY = 120;      // 表盘圆心（viewBox 240×240）
-  const NUM_R = 75;              // 罗马数字所在半径（分段色环内缘 92 之内）
-  const RAIL_R0 = 54, RAIL_R1 = 90, RAIL_STEP = 3;   // 放射状阴影线：r 54~90，每 3 度一根
+  const NUM_R = 76;              // 罗马数字所在半径（色环内缘 79 之内）
+  const RAIL_R0 = 53, RAIL_R1 = 90, RAIL_STEP = 3;   // 放射状阴影线：r 53~90，每 3 度一根
+  const KNURL_R0 = 106, KNURL_R1 = 118, KNURL_STEP = 2;  // 表圈滚花细齿：r 112~118，每 2 度
   const COLLAPSE_MAX = 900;      // 窄于此宽度默认折叠
 
   /* 常见音频容器（含浏览器能解但不能解码的，交给 audio 元素自己判定） */
@@ -257,6 +258,7 @@
     active: false,
     collapsed: false,
     userExpanded: false,
+    firstIntroDone: false,
     lastMinute: -1,
     timer: 0,
     warnTimer: 0,
@@ -283,6 +285,7 @@
 
       this.buildNumerals();
       this.buildRails();
+      this.buildKnurl();
       this.applyMusic();
       this.bindToggle();
       this.bindPointer();
@@ -327,6 +330,26 @@
         line.setAttribute('y1', (CY + sin * RAIL_R0).toFixed(2));
         line.setAttribute('x2', (CX + cos * RAIL_R1).toFixed(2));
         line.setAttribute('y2', (CY + sin * RAIL_R1).toFixed(2));
+        frag.appendChild(line);
+      }
+      g.appendChild(frag);
+    },
+
+    /* 金属表圈的滚花细齿：2 度一根，明暗交替（一白一暗）做出机械倒角。
+       180 根静态 DOM，画完就不再改。 */
+    buildKnurl() {
+      const g = this.dial && this.dial.querySelector('.dial-knurl');
+      if (!g) return;
+      const frag = document.createDocumentFragment();
+      for (let deg = 0, i = 0; deg < 360; deg += KNURL_STEP, i++) {
+        const a = (deg - 90) * Math.PI / 180;
+        const cos = Math.cos(a), sin = Math.sin(a);
+        const line = document.createElementNS(SVG_NS, 'line');
+        line.setAttribute('class', 'dial-knurl-line' + (i % 2 ? ' is-dark' : ''));
+        line.setAttribute('x1', (CX + cos * KNURL_R0).toFixed(2));
+        line.setAttribute('y1', (CY + sin * KNURL_R0).toFixed(2));
+        line.setAttribute('x2', (CX + cos * KNURL_R1).toFixed(2));
+        line.setAttribute('y2', (CY + sin * KNURL_R1).toFixed(2));
         frag.appendChild(line);
       }
       g.appendChild(frag);
@@ -564,10 +587,27 @@
       this.el.classList.toggle('is-on', this.active);
       this.el.inert = !this.active;
       this.el.setAttribute('aria-hidden', this.active ? 'false' : 'true');
-      if (!this.active) {
+      if (this.active) {
+        this.playIntro();
+      } else {
         Motion.reset();
         DropZone.clear();
       }
+    },
+
+    /* ---- 夸张的首次入场：整套动画只在第一次入水播一次 ----
+       再入水（ESC 重置后）只点亮，不重播，避免每次重置都被甩一下。
+       动画结束就摘掉 .is-first —— 之后 .dial-sweep / .dialFlash 都不再命中。 */
+    playIntro() {
+      if (this.firstIntroDone) return;
+      this.firstIntroDone = true;
+      this.el.classList.add('is-first');
+      const sweep = this.el.querySelector('.dial-sweep');
+      const done = () => this.el.classList.remove('is-first');
+      const target = sweep || this.el;
+      target.addEventListener('animationend', done, { once: true });
+      /* 兜底：万一动画被 prefers-reduced-motion 之类压成 0 时长 */
+      window.setTimeout(done, 2600);
     },
 
     /* ---- 第四项：暂停并归零音频 ---- */
@@ -589,9 +629,14 @@
       if (!this.disc) return;
       const wasSpinning = this.disc.classList.contains('is-spinning');
       if (!wasSpinning && !(this.audio && !this.audio.paused)) return;
-      this.disc.classList.remove('is-spinning');
-      void this.disc.offsetWidth;        // 强制回流，让动画从 0 度重新开始
-      this.disc.classList.add('is-spinning');
+      /* 唱片与中央封面标签同步转：标签是"贴"在唱片上的，各自跑 12s 线性的
+         同一组关键帧就是同一角速度，不需要额外对齐 */
+      [this.disc, this.cover].forEach((el) => {
+        if (!el) return;
+        el.classList.remove('is-spinning');
+        void el.offsetWidth;             // 强制回流，让动画从 0 度重新开始
+        el.classList.add('is-spinning');
+      });
     },
 
     reset() {
@@ -604,6 +649,7 @@
       Motion.reset();
       DropZone.clear();
       this.syncCollapsed();
+      this.firstIntroDone = true;        // 夸张入场只给第一次入水
       this.lastMinute = -1;              // 下一次 tick 重写 aria-label
       this.tick();                       // 现实时间照常，不重置时间本身
     }

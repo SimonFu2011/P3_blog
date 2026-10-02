@@ -53,6 +53,8 @@ const chrome = spawn(CHROME, [
   '--remote-debugging-port=' + PORT,
   '--remote-allow-origins=*',
   '--disable-gpu',
+  '--no-sandbox',
+  '--disable-dev-shm-usage',
   '--hide-scrollbars',
   '--window-size=1440,900',
   /* 无头下没有音频设备，默认策略会让 play() 直接 reject */
@@ -166,12 +168,17 @@ const main = async () => {
       state: window.Boot.state,
       rings: document.querySelectorAll('.dial-rings i').length,
       rails: document.querySelectorAll('.dial-rail').length,
-      numerals: document.querySelectorAll('.dial-numeral').length
+      knurl: document.querySelectorAll('.dial-knurl-line').length,
+      numerals: document.querySelectorAll('.dial-numeral').length,
+      first: dock.classList.contains('is-first'),
+      burst: document.querySelectorAll('.dock-burst i').length
     };
   })()`);
   ok(boot.on && boot.state === 'settled', `时钟点亮（is-on=${boot.on}, state=${boot.state}）`);
   ok(boot.rings === 4, `外围光圈 4 层（实际 ${boot.rings}）`);
   ok(boot.rails === 120, `表盘放射阴影线 120 根（实际 ${boot.rails}）`);
+  ok(boot.knurl === 180, `表圈滚花细齿 180 根（实际 ${boot.knurl}）`);
+  ok(boot.burst === 3, `入场爆开光环 3 层（实际 ${boot.burst}）`);
   ok(boot.numerals === 12, `罗马数字 12 个（实际 ${boot.numerals}）`);
 
   // ---- 尺寸 ----
@@ -185,8 +192,18 @@ const main = async () => {
       dialVar: getComputedStyle(dock).getPropertyValue('--dial').trim(),
       dialW: r.width, dockW: dr.width, dockH: dr.height,
       vw: innerWidth, vh: innerHeight,
-      overTop: dr.top < 0, overBottom: dr.bottom > innerHeight,
-      overLeft: dr.left < 0, overRight: dr.right > innerWidth
+      overTop: dr.top < -0.5, overBottom: dr.bottom > innerHeight + 0.5,
+      overLeft: dr.left < -0.5, overRight: dr.right > innerWidth + 0.5,
+      dockBox: [ +dr.left.toFixed(2), +dr.top.toFixed(2), +dr.right.toFixed(2), +dr.bottom.toFixed(2) ],
+      diag: { iw: innerWidth, ih: innerHeight, ow: outerWidth,
+              resolved: (function () {
+                var probe = document.createElement('div');
+                probe.style.cssText = 'position:absolute;width:var(--dial)';
+                dock.appendChild(probe);
+                var w = probe.getBoundingClientRect().width;
+                probe.remove();
+                return +w.toFixed(2);
+              })() }
     };
   })()`);
   console.log('   ', JSON.stringify(size));
@@ -194,8 +211,29 @@ const main = async () => {
   ok(!size.overTop && !size.overBottom && !size.overLeft && !size.overRight,
      '面板四面都没有溢出视口');
 
+  // ---- 表壳：圆形金属表圈占比 ----
+  console.log('\n[3] 表壳比例（表圈外径应 ≥ 容器的 80%）');
+  const caseFit = await js(`(function(){
+    var dial = document.getElementById('dial').getBoundingClientRect();
+    var bezel = document.querySelector('.dial-bezel').getBoundingClientRect();
+    var face = document.querySelector('.dial-face').getBoundingClientRect();
+    return {
+      dial: dial.width,
+      bezel: bezel.width,
+      bezelRatio: bezel.width / dial.width,
+      faceRatio: face.width / dial.width,
+      bezelRadius: getComputedStyle(document.querySelector('.dial-bezel')).r,
+      sweep: !!document.querySelector('.dial-sweep'),
+      bplate: !!document.querySelector('.dial-bplate')
+    };
+  })()`);
+  console.log('   ', JSON.stringify(caseFit));
+  ok(caseFit.bezelRatio >= 0.8, `表圈外径占容器 ${(caseFit.bezelRatio * 100).toFixed(1)}%（要求 ≥80%）`);
+  ok(caseFit.bezelRatio < 1.02, '表圈没有溢出容器');
+  ok(caseFit.sweep && caseFit.bplate, '入场扫光层与厚度侧面层都在');
+
   // ---- 层级 ----
-  console.log('\n[3] 层级（黑胶盖住指针）');
+  console.log('\n[4] 层级（黑胶盖住指针）');
   const layer = await js(`(function(){
     var disc = document.querySelector('.vinyl-disc');
     var clock = document.getElementById('dialClock');
@@ -220,8 +258,35 @@ const main = async () => {
      `黑胶层显式抬升（vinyl z-index=${layer.vinylZ}，clock z-index=${layer.clockZ}）`);
   ok(layer.handIsVinyl, '指针行程上的像素命中的是黑胶层（视觉上盖住指针）');
 
+  // ---- 指针几何：造型要细长、分针要更长 ----
+  console.log('\n[5] 指针几何（老式镂空造型）');
+  const handGeo = await js(`(function(){
+    var box = function (sel) {
+      var b = document.querySelector(sel).getBoundingClientRect();
+      var d = document.getElementById('dial').getBoundingClientRect();
+      return { w: b.width, h: b.height, cy: b.top + b.height/2 - d.top - d.height/2, dial: d.width };
+    };
+    var hour = box('#dialHour');
+    var min = box('#dialMin');
+    return {
+      hourW: hour.w / hour.dial, hourH: hour.h / hour.dial,
+      minW: min.w / min.dial, minH: min.h / min.dial,
+      minOffsetY: min.cy / min.dial,
+      shapes: document.querySelectorAll('.dial-hand-shape').length,
+      bosses: document.querySelectorAll('.dial-hand-boss').length,
+      pierce: document.querySelectorAll('.dial-hand-pierce').length
+    };
+  })()`);
+  console.log('   ', JSON.stringify(handGeo));
+  ok(handGeo.shapes === 2 && handGeo.bosses === 2 && handGeo.pierce === 2,
+     '时针 / 分针都是 path + 中心轴帽 + 镂空孔');
+  ok(handGeo.minH > handGeo.hourH, `分针比时针长（${handGeo.minH.toFixed(2)} > ${handGeo.hourH.toFixed(2)}）`);
+  ok(handGeo.minW < 0.12 && handGeo.hourW < 0.36,
+     `时针盘状、分针细杆（宽度上限内，宽 ${(handGeo.hourW * 100).toFixed(1)}% / ${(handGeo.minW * 100).toFixed(1)}%）`);
+  ok(handGeo.minOffsetY < -0.1, `分针向上偏置，长尾留在轴下（cy=${handGeo.minOffsetY.toFixed(2)}）`);
+
   // ---- 3D 倾斜 + 视差 ----
-  console.log('\n[4] 悬停 3D 倾斜（外层正 / 黑胶反）+ 背景视差');
+  console.log('\n[6] 悬停 3D 倾斜（外层正 / 黑胶反）+ 背景视差');
   const box = await js(`(function(){
     var r = document.getElementById('dial').getBoundingClientRect();
     return { left: r.left, top: r.top, w: r.width, h: r.height };
@@ -280,8 +345,14 @@ const main = async () => {
      `黑胶幅度约为外层一半（${aVinyl.toFixed(2)} / ${aClock.toFixed(2)} = ${ratio.toFixed(2)}）`);
   const full = (a) => a / Math.max(0.001, Math.abs(t.mx));
   console.log(`    折算到 --mx=1：外层 ≈ ${full(aClock).toFixed(1)}deg，黑胶 ≈ ${full(aVinyl).toFixed(1)}deg`);
-  ok(full(aClock) >= 6 && full(aClock) <= 10, '外层满值倾角落在 6–10deg');
-  ok(full(aVinyl) >= 3 && full(aVinyl) <= 6, '黑胶满值反向倾角落在 3–6deg');
+  ok(full(aClock) >= 15 && full(aClock) <= 18,
+     `外层满值倾角 ≈16deg（要"能看到表盘厚度"，远大于上一版 7deg）`);
+  ok(full(aVinyl) >= 7 && full(aVinyl) <= 9, '黑胶满值反向倾角 ≈8deg');
+  // 透视距离 + 旋转角 → 估算表盘边缘的 Z 位移，够不够看出"厚度"
+  const perspective = await js(`getComputedStyle(document.getElementById('dialScene')).perspective`);
+  const zShift = Math.sin(full(aClock) * Math.PI / 180) * (box.w * 0.45);
+  console.log(`    perspective=${perspective}，满值倾斜时表盘边缘 Z 位移 ≈ ${zShift.toFixed(1)}px`);
+  ok(zShift > 53, `满值倾斜时表盘边缘进出屏幕约 ${zShift.toFixed(0)}px，足以看到厚度侧面`);
   const parX = t.par[12], parY = t.par[13];
   ok(Math.sign(parX) === -Math.sign(t.mx) && Math.sign(parY) === -Math.sign(t.my),
      `背景视差方向与鼠标相反（鼠标 +x/+y → 背景 ${parX.toFixed(2)}px / ${parY.toFixed(2)}px）`);
@@ -294,7 +365,7 @@ const main = async () => {
   await shot('dock-hover-tilt');
 
   // ---- 移出复位 ----
-  console.log('\n[5] 鼠标离开 → 平滑复位');
+  console.log('\n[7] 鼠标离开 → 平滑复位');
   // 合成鼠标事件的坐标到不了 renderer 的命中测试，于是直接派发 Chrome"离开元素"
   // 时真正会派发的 pointerleave（监听器就挂在 #dialScene 上），验证复位链路
   await js(`(function(){
@@ -339,7 +410,7 @@ const main = async () => {
      '离开后外层 / 黑胶 / 视差一起平滑复位到原点');
 
   // ---- 光圈动画 ----
-  console.log('\n[6] 最外围持续扩散的光圈');
+  console.log('\n[8] 最外围持续扩散的光圈');
   const pulse = await js(`(function(){
     var i = document.querySelector('.dial-rings i');
     var cs = getComputedStyle(i);
@@ -361,7 +432,7 @@ const main = async () => {
   ok(pulse.halo === 'dialHalo', '表盘边缘还有一道持续呼吸光（动画名 dialHalo）');
 
   // ---- 表盘纹理 ----
-  console.log('\n[7] 表盘阴影线 / 纹理');
+  console.log('\n[9] 表盘阴影线 / 纹理');
   const tex = await js(`(function(){
     var el = document.querySelector('.dial-texture');
     var cs = getComputedStyle(el);
@@ -379,12 +450,12 @@ const main = async () => {
   console.log('   ', JSON.stringify(tex));
   ok(tex.hasLayers >= 4, `表盘纹理叠了 ${tex.hasLayers} 层渐变（放射线 / 斜排线 / 同心刻线）`);
   ok(tex.mask, '纹理用径向遮罩避开中心黑胶与外缘');
-  ok(Math.abs(tex.sizeRatio - 0.767) < 0.01, `纹理只覆盖 r≤92 的盘面（占方盒 ${(tex.sizeRatio * 100).toFixed(1)}%）`);
+  ok(Math.abs(tex.sizeRatio - 0.8) < 0.01, `纹理只覆盖 r≤96 的盘面（占方盒 ${(tex.sizeRatio * 100).toFixed(1)}%）`);
   ok(tex.pe === 'none', '纹理层不参与命中');
   ok(String(tex.q4).includes('url('), '左上的分段色环改用 SVG 斜排线图案填充');
 
   // ---- 交互命中 ----
-  console.log('\n[8] 交互命中（光圈 / 纹理不挡指针、黑胶、拖拽）');
+  console.log('\n[10] 交互命中（光圈 / 纹理不挡指针、黑胶、拖拽）');
   const hits = await js(`(function(){
     var disc = document.querySelector('.vinyl-disc');
     var dr = disc.getBoundingClientRect();
@@ -403,7 +474,7 @@ const main = async () => {
   ok(hits.dropPE === 'none', '非拖拽期间落点不参与命中（不与扇形菜单抢点击）');
 
   // ---- 拖拽：非音频 ----
-  console.log('\n[9] 拖拽反馈：非音频文件');
+  console.log('\n[11] 拖拽反馈：非音频文件');
   const drag = await js(`(function(){
     var dial = document.getElementById('dial');
     var disc = document.querySelector('.vinyl-disc');
@@ -455,7 +526,7 @@ const main = async () => {
   await shot('dock-drop-reject');
 
   // ---- 拖拽：音频 ----
-  console.log('\n[10] 拖入音频 → 播放 + 状态更新');
+  console.log('\n[12] 拖入音频 → 播放 + 状态更新');
   const wavB64 = makeWavB64(1.5, 440, 44100);
   const play = await js(`(async function(){
     var bin = atob(${JSON.stringify(wavB64)});
@@ -493,7 +564,7 @@ const main = async () => {
   await shot('dock-playing');
 
   // ---- 播放 / 暂停 ----
-  console.log('\n[11] 点击唱片 → 暂停 / 继续');
+  console.log('\n[13] 点击唱片 → 暂停 / 继续');
   const toggle = await js(`(async function(){
     var disc = document.querySelector('.vinyl-disc');
     var audio = document.querySelector('#dock audio');
@@ -512,7 +583,7 @@ const main = async () => {
      '再次点击继续播放且唱片复转');
 
   // ---- 指针 ----
-  console.log('\n[12] 指针计时逻辑不受影响');
+  console.log('\n[14] 指针计时逻辑不受影响');
   const hands = await js(`(function(){
     return {
       hour: document.getElementById('dialHour').getAttribute('transform'),
@@ -525,7 +596,7 @@ const main = async () => {
      '时针 / 分针仍在按现实时间旋转');
 
   // ---- ESC 重置 ----
-  console.log('\n[13] ESC 重置无回归');
+  console.log('\n[15] ESC 重置无回归');
   await js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`);
   await sleep(1000);
   const after = await js(`(function(){
@@ -549,7 +620,7 @@ const main = async () => {
   ok(after.idle, '倾斜与视差也复位了');
 
   // ---- 响应式：窄窗口 ----
-  console.log('\n[14] 响应式（1280×720 与 900×640）');
+  console.log('\n[16] 响应式（1280×720 与 900×640）');
   await S('Emulation.setDeviceMetricsOverride', {
     width: 1280, height: 720, deviceScaleFactor: 1, mobile: false
   });
@@ -581,7 +652,7 @@ const main = async () => {
      '窄屏收成小钟按钮，点击可展开（原有折叠行为保留）');
 
   // ---- 控制台 ----
-  console.log('\n[15] 网络与控制台');
+  console.log('\n[17] 网络与控制台');
   if (netFails.length) netFails.slice(0, 8).forEach((u) => console.log('     net:', u));
   const realErrors = consoleErrors.filter((e) => !/favicon/i.test(e));
   ok(realErrors.length === 0, `无控制台错误（${realErrors.length}）`);

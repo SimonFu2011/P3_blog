@@ -20,6 +20,10 @@ acl-report-*
 !.preview/verify-dock.mjs
 !.preview/check-layout.mjs
 !.preview/check-mobile-rm.mjs
+!.preview/shoot.mjs
+!.preview/measure.mjs
+!.preview/tiltshot.mjs
+!.preview/introshot.mjs
 
 # ------------------------------------------------------------
 # 系统 / 编辑器

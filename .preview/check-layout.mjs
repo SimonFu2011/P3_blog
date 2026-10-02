@@ -6,7 +6,9 @@ const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const PORT = 9340;
 const chrome = spawn(CHROME, [
   '--headless=new', '--remote-debugging-port=' + PORT, '--remote-allow-origins=*',
-  '--disable-gpu', '--hide-scrollbars', '--window-size=1440,900',
+  '--disable-gpu',
+  '--no-sandbox',
+  '--disable-dev-shm-usage', '--hide-scrollbars', '--window-size=1440,900',
   '--user-data-dir=D:\\DS\\.preview\\cp-layout', 'about:blank'
 ], { stdio: 'ignore' });
 
@@ -69,7 +71,7 @@ for (const [w, h] of sizes) {
     var out = {
       collapsed: collapsed,
       dialVar: cs.getPropertyValue('--dial').trim(),
-      dial: Math.round(d.w) - 30,   // .dock 宽 = --dial + 30px
+      dial: Math.round(d.w) - 26,   // 展开时 .dock 宽 = --dial + 26px
       dock: [Math.round(d.l), Math.round(d.t), Math.round(d.r), Math.round(d.b)],
       dockOverflow: d.l < -1 || d.t < -1 || d.r > innerWidth + 1 || d.b > innerHeight + 1,
       bodyHidden: getComputedStyle(body).display === 'none',
