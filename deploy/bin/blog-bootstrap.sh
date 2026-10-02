@@ -63,8 +63,23 @@ chmod 755 /srv/blog
 # ------------------------------------------------------------
 # 4. 安装发布脚本
 # ------------------------------------------------------------
-log "安装 /usr/local/bin/blog-publish"
-install -m 755 "$REPO_DIR/deploy/bin/blog-publish.sh" /usr/local/bin/blog-publish
+log "安装 /usr/local/bin/blog-publish（含本机路径包装器）"
+install -d -m 755 /usr/local/lib/p3blog
+install -m 755 "$REPO_DIR/deploy/bin/blog-publish.sh" /usr/local/lib/p3blog/blog-publish.sh
+
+# 真实脚本与仓库保持一致；本机路径放进生成的包装器，
+# 这样直接跑 `blog-publish`（不带环境变量）也能找对仓库与站点目录。
+cat > /usr/local/bin/blog-publish <<WRAPPER
+#!/usr/bin/env bash
+# 本文件由 deploy/bin/blog-bootstrap.sh 生成，固定本机的仓库与站点路径。
+# 临时覆盖照样可以用环境变量，例如：WEB_ROOT=/tmp/x blog-publish
+REPO_DIR="\${REPO_DIR:-$REPO_DIR}"
+WEB_ROOT="\${WEB_ROOT:-$WEB_ROOT}"
+BRANCH="\${BRANCH:-$BRANCH}"
+export REPO_DIR WEB_ROOT BRANCH
+exec /usr/local/lib/p3blog/blog-publish.sh "\$@"
+WRAPPER
+chmod 755 /usr/local/bin/blog-publish
 
 # ------------------------------------------------------------
 # 5. nginx 站点

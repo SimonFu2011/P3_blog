@@ -146,8 +146,24 @@ if [ ! -d "$REPO_DIR/.git" ]; then
 fi
 chown -R "$DEPLOY_USER:$DEPLOY_USER" "$REPO_DIR"
 
-log "安装 /usr/local/bin/blog-publish"
-install -m 755 "$REPO_DIR/deploy/bin/blog-publish.sh" /usr/local/bin/blog-publish
+log "安装 /usr/local/bin/blog-publish（含本机路径包装器）"
+install -d -m 755 /usr/local/lib/p3blog
+install -m 755 "$REPO_DIR/deploy/bin/blog-publish.sh" /usr/local/lib/p3blog/blog-publish.sh
+
+# 真实脚本保持与仓库逐字节一致，本机路径放进这个生成出来的包装器里。
+# 否则直接跑 `ssh blog@host blog-publish`（不带环境变量）会退回脚本里的
+# 通用默认值 /var/www/blog，在宝塔机器上必然报 "mkdir: /var/www: Permission denied"。
+cat > /usr/local/bin/blog-publish <<WRAPPER
+#!/usr/bin/env bash
+# 本文件由 deploy/bin/blog-bootstrap-bt.sh 生成，固定本机的仓库与站点路径。
+# 临时覆盖照样可以用环境变量，例如：WEB_ROOT=/tmp/x blog-publish
+REPO_DIR="\${REPO_DIR:-$REPO_DIR}"
+WEB_ROOT="\${WEB_ROOT:-$WEB_ROOT}"
+BRANCH="\${BRANCH:-$BRANCH}"
+export REPO_DIR WEB_ROOT BRANCH
+exec /usr/local/lib/p3blog/blog-publish.sh "\$@"
+WRAPPER
+chmod 755 /usr/local/bin/blog-publish
 
 # ------------------------------------------------------------
 # 4. 站点目录权限：保持面板期望的 www:www，同时让 blog 能发布
