@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>404 — 这里没有东西</title>
 <meta name="description" content="页面不存在。沉到水底了。">
+<!-- nginx 是在原 URL 上内部重写到 /404.html 的，地址栏仍停在 /foo/bar。
+     没有这一行时，下面的 css/js/导航都按 /foo/ 解析而 404，页面会变成裸 HTML。 -->
+<base href="/">
 <link rel="stylesheet" href="css/pages.css">
 </head>
 <body>
