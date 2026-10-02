@@ -29,13 +29,18 @@
         li.style.setProperty('--angle', item.angle + 'deg');
         li.dataset.i = String(i);
 
+        /* label 是主标签（中文），jp 只作为旧配置的兼容回退 */
+        const label = item.label || item.jp || '';
+        /* 占位项（href 是 # 或空）：跳转前先说明一句，避免看起来"点了没反应" */
+        if (!item.href || item.href === '#') item.placeholder = true;
+
         const a = document.createElement('a');
         a.className = 'fan-link';
         a.href = item.href || '#';
         a.dataset.i = String(i);
-        a.setAttribute('aria-label', item.jp + ' / ' + item.en);
+        a.setAttribute('aria-label', label + ' / ' + item.en);
         a.innerHTML =
-          '<span class="fi-jp">' + item.jp + '</span>' +
+          '<span class="fi-jp">' + label + '</span>' +
           '<span class="fi-en" aria-hidden="true">' + item.en + '</span>';
 
         a.addEventListener('mouseenter', () => this.setIndex(i, { silent: true }));
@@ -52,7 +57,9 @@
       /* 尺寸稳定后再算一次，避免字体加载/回流导致测量偏差 */
       if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => this.layout());
       window.addEventListener('resize', () => this.layout());
-      this.setIndex(3);
+      /* 初始选中项取"内容入口"（博客文章），不是第一项：
+         落水后菜单是沿弧线依次旋出的，中间那条停在最稳的位置上。 */
+      this.setIndex(this.defaultIndex());
       /* 入场态：菜单还没旋出，先把它整块关掉（Tab 顺序 + 命中测试） */
       this.setInteractive(false);
     },
@@ -72,14 +79,41 @@
       });
     },
 
+    /* 初始选中项：优先找"博客文章"这条内容入口，找不到就取正中一条。
+       写死索引在条目数变化时会指错，这里按语义定位。 */
+    defaultIndex() {
+      if (!this.items.length) return 0;
+      const hit = this.items.findIndex(({ data }) => data.href && /archive\.html/.test(data.href));
+      if (hit >= 0) return hit;
+      return Math.floor((this.items.length - 1) / 2);
+    },
+
     /* 依据视口算扇形半径与张角。
-       原点在 .fan 中心（left:40%），所以"塞得下"的条件是：
-       半径 + 最长条目宽度 ≈ 屏幕右侧剩余空间 */
+       原点在 .fan 中心（无角色模型时 42%，见下面的 originRatio），
+       所以"塞得下"的条件是：
+       原点 + 半径*cos(θ) + 条目自身宽度 ≤ 视口右边界 − 安全边距。
+
+       注意是逐条解、取最小，而不是拿"全部条目里最宽的那条"一把套：
+       条目越靠右，右边的余量越小，而扇形里一定有一条落在 0°（正右方）。
+       用 max(width) 套任意角度，会把"角度大、其实更靠中间"的那条
+       当成"最靠右"的那条，于是半径被压得过小 —— 之前就是这样：
+       1440 下最右只剩 18px 余量，1600 以上直接溢出视口。 */
     layout() {
       const cfg = window.SITE.tuning;
       const w = window.innerWidth;
       const h = window.innerHeight;
       if (!this.items.length) return;
+
+      /* 选中项带 scale(1.06) 与 -0.1em 左移，两者都会把右边缘往外推，
+         算半径时必须算进去 —— 贴边的往往正是选中项。
+         宽度一律取 offsetWidth（布局盒，不含 transform），
+         这样结果与"此刻有没有加 .is-active"无关，init 与 resize 两条
+         路径量到的是同一组数。 */
+      const ACTIVE_SCALE = 1.06;
+      const layoutWidth = (el, link) => {
+        const w0 = link.offsetWidth || link.getBoundingClientRect().width;
+        return w0 * (el.classList.contains('is-active') ? ACTIVE_SCALE : 1);
+      };
 
       /* 窄屏改用纵向堆叠（弧线错位），硬挤扇形会把半径压成一小团 */
       const stacked = w < 820;
@@ -96,32 +130,50 @@
       const maxAngle = Math.max.apply(null, angles) * Math.PI / 180;
 
       /* 扇形原点：没有角色模型时整体左移，让菜单居中承压；
-         若接入了 Cubism 模型则右移，给角色让出位置 */
+         若接入了 Cubism 模型则右移，给角色让出位置。
+         0.34 → 0.40（窄屏再往右一点）：菜单从 7 项收到 3 项、字号又放大了
+         1.4 倍之后，原来那个原点会把整块甩到画面右侧，
+         左移之后视觉重心才回到画面中部、右边界也有安全距离。
+         注意这里写的是 inline 变量，会盖掉 CSS 媒体查询 —— 所以断点必须
+         在这里复现一份，CSS 里那两个值只是"脚本没跑"时的兜底。 */
       const hasModel = !!(window.Character && window.Character.mounted);
-      const originRatio = hasModel ? 0.46 : 0.34;
+      const baseOrigin = w <= 900 ? 0.46 : (w <= 1100 ? 0.44 : 0.42);
+      const originRatio = hasModel ? baseOrigin + 0.12 : baseOrigin;
       const originX = w * originRatio;
       if (this.nav) this.nav.style.setProperty('--fan-origin-x', (originRatio * 100).toFixed(1) + '%');
-      const rightRoom = w - originX - 26;
+      const safety = 26;
+      const rightRoom = w - originX - safety;
 
-      /* 先量最宽的一条，反推可用半径 */
+      /* 反推半径上限：对每一条分别解出"它自己能用的最大半径"，取最小值。
+         第 i 条的右边缘 ≈ r*cos(θi) + 自己的宽度。
+         角度直接读配置里的 data.angle，不要从 DOM 的 inline 变量反解析。 */
+      let roomForRadius = Infinity;
       let widest = 0;
-      this.items.forEach(({ link }) => {
-        const r = link.getBoundingClientRect();
-        if (r.width > widest) widest = r.width;
+      this.items.forEach(({ el, link, data }) => {
+        const own = layoutWidth(el, link);
+        if (own > widest) widest = own;
+        const a = Math.abs(Number(data.angle) || 0) * Math.PI / 180;
+        const limit = (rightRoom - own) / Math.max(0.2, Math.cos(a));
+        if (limit < roomForRadius) roomForRadius = limit;
       });
+      if (!isFinite(roomForRadius)) roomForRadius = rightRoom;
       if (!widest) widest = w * 0.34;
 
-      const roomForRadius = (rightRoom - widest) / Math.max(0.2, Math.cos(maxAngle));
       /* 纵向留白：最外侧条目落在 50% ± 0.29h 以内
          （半径 × sin(角度) = 纵向偏移，所以半径上限 = 0.29h / sin） */
       const verticalRoom = (h * 0.29) / Math.max(0.14, Math.sin(maxAngle));
 
+      /* 宽屏会把扇形整体推远一点（--spread），而实际落的半径是
+         base * spread —— 上面解出来的上限是"实际半径"的上限，
+         所以换回 base 时要除掉 spread，否则宽屏上会算出超界的位置
+         （1920 那版就是漏了这一步，最右一条溢出视口 4px）。 */
+      this.spread = clamp((w / 1440) * (cfg.fanSpread || 1), 0.62, 1.2);
+
       const base = clamp(
-        Math.min(cfg.fanRadius * (w / 1440), roomForRadius, verticalRoom),
+        Math.min(cfg.fanRadius * (w / 1440) / this.spread, roomForRadius / this.spread, verticalRoom / this.spread),
         w * 0.12,
         w * 0.44
       );
-      this.spread = clamp((w / 1440) * (cfg.fanSpread || 1), 0.62, 1.2);
       const rot = '0deg';
 
       this.items.forEach(({ el, data }) => {
@@ -132,9 +184,10 @@
       });
       if (this.nav) this.nav.style.setProperty('--spread', this.spread.toFixed(3));
 
-      /* 窄屏时整体缩小字号，避免横向溢出 */
+      /* 窄屏时整体缩小字号，避免横向溢出（最后一次兜底：
+         上面已经按条目宽度解过半径，这里只是给"极端字体回退"留保险） */
       let fontScale = 1;
-      const after = this.items.reduce((mx, { link }) => Math.max(mx, link.getBoundingClientRect().width), 0);
+      const after = this.items.reduce((mx, { el, link }) => Math.max(mx, layoutWidth(el, link)), 0);
       const outermost = base * Math.cos(maxAngle) + after;
       if (outermost > rightRoom) fontScale = clamp(rightRoom / outermost, 0.5, 1);
       if (this.nav) this.nav.style.setProperty('--font-scale', fontScale.toFixed(3));
@@ -195,7 +248,7 @@
         el.style.animationDelay = '';
       });
       this.setInteractive(false);
-      this.setIndex(3, { silent: true });   // 回到初始选中项
+      this.setIndex(this.defaultIndex(), { silent: true });   // 回到初始选中项
     },
 
     setIndex(i, { silent = false } = {}) {
@@ -232,8 +285,9 @@
       this.setIndex(i);
       this.pulse();
       const href = item.data.href || '';
-      /* 占位锚点（#xxx）不跳转，其余交给浏览器；接真实页面时无需改动 */
-      if (href.startsWith('#')) {
+      /* 占位锚点（#xxx / 空）：不跳转，只派发事件让外层决定做什么。
+         真实页面（about.html 等）交给浏览器正常导航。 */
+      if (href === '' || href.startsWith('#')) {
         if (event) event.preventDefault();
         document.dispatchEvent(new CustomEvent('site:navigate', { detail: item.data }));
       }

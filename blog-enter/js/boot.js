@@ -102,8 +102,11 @@
         keys.innerHTML = cfg.hints.map((h) =>
           '<span class="ck"><b>' + h.key + '</b>' + h.text + '</span>').join('');
       }
+      /* 署名：{year} 占位换成当前年份（子页面由 pages.js 做同一件事） */
       const credit = $('.credit');
-      if (credit) credit.textContent = cfg.footer;
+      if (credit) credit.textContent = String(cfg.footer || '').replace('{year}', String(new Date().getFullYear()));
+      /* 页面标题也跟着配置走 */
+      if (cfg.name) document.title = 'ENTER — ' + cfg.name;
     },
 
     /* ---------------- 输入 ---------------- */
@@ -146,8 +149,10 @@
       }
 
       document.addEventListener('site:navigate', (e) => {
-        /* 占位：接真实页面时把这里换成路由跳转 */
-        console.log('[navigate]', e.detail.en, e.detail.href);
+        /* 占位栏目（例如 "待定"）：还没内容可去，只在控制台留痕。
+           真实页面（about.html / archive.html）由 <a> 自己完成导航，
+           不会走到这里 —— 见 menu.js 的 activate()。 */
+        console.log('[navigate] 占位栏目，暂无页面:', e.detail.en, e.detail.href);
       });
     },
 
