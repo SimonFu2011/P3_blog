@@ -81,12 +81,10 @@ sudo DOMAIN=blog.example.com \
 上面第 2 步的便利路径 `ssh blog@server blog-publish` 需要 `blog` 用户认得你的公钥。
 在**本地 Windows** 上执行（没有密钥就先 `ssh-keygen -t ed25519`）：
 
-```bash
-# Git Bash / PowerShell 均可
-ssh-copy-id blog@blog.example.com
-# 没有 ssh-copy-id 就用：
-# type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh root@blog.example.com `
-#   "install -d -m 700 -o blog -g blog /home/blog/.ssh && cat >> /home/blog/.ssh/authorized_keys && chown blog:blog /home/blog/.ssh/authorized_keys && chmod 600 /home/blog/.ssh/authorized_keys"
+```powershell
+# Windows 版 OpenSSH 没有 ssh-copy-id，用这条（会提示输一次服务器密码）
+$key = Get-Content "$env:USERPROFILE\.ssh\id_ed25519.pub"
+ssh root@blog.example.com "install -d -m 700 -o blog -g blog /home/blog/.ssh && echo '$key' >> /home/blog/.ssh/authorized_keys && chown blog:blog /home/blog/.ssh/authorized_keys && chmod 600 /home/blog/.ssh/authorized_keys && echo KEY_INSTALLED"
 ```
 
 验证：`ssh blog@blog.example.com blog-publish` 应该直接打印 published 的 commit。

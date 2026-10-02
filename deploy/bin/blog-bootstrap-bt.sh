@@ -6,43 +6,101 @@
 #   · 不装 apt 版 nginx —— 宝塔自己编译的 nginx 在 /www/server/nginx，
 #     再装一个系统 nginx 会抢 80 端口、让面板的网站功能失灵。
 #   · 不装 certbot —— 证书在面板里点（网站 → SSL → Let's Encrypt）。
-#   · 不改主配置 —— 站点规则贴进"伪静态"，面板重新生成主配置时不会丢。
+#   · 不改主配置 —— 站点规则追加进"伪静态"，面板重新生成主配置时不会丢。
 #
 # 前置条件（面板里先做完）：
-#   网站 → 添加站点，域名填 simonfu.xin，PHP 版本选「纯静态」，
-#   不要创建数据库和 FTP。
+#   网站 → 添加站点，PHP 版本选「纯静态」，不要创建数据库和 FTP。
 #
-# 用法（在服务器上，root）：
+# 用法（在服务器上，root）——给这个站点的**任意一个**域名都行：
 #   DOMAIN=simonfu.xin bash /srv/blog/repo/deploy/bin/blog-bootstrap-bt.sh
+#   DOMAIN=43.108.100.116 bash /srv/blog/repo/deploy/bin/blog-bootstrap-bt.sh
+#
+# 站点根目录与伪静态文件名**由脚本自己去 vhost 里查**，不需要你记得
+# 宝塔建站时"第一个域名"填的是什么（它决定这两者的命名）。
 # ============================================================
 set -euo pipefail
 
-DOMAIN="${DOMAIN:-}"
-DEPLOY_USER="${DEPLOY_USER:-blog}"
-REPO_DIR="${REPO_DIR:-/srv/blog/repo}"
-WEB_ROOT="${WEB_ROOT:-/www/wwwroot/$DOMAIN}"
-BRANCH="${BRANCH:-main}"
-
 BT_NGINX=/www/server/nginx/sbin/nginx
+BT_VHOST_DIR=/www/server/panel/vhost/nginx
 BT_REWRITE_DIR=/www/server/panel/vhost/rewrite
 
-[ "$(id -u)" -eq 0 ] || { echo "请用 root 执行（sudo）" >&2; exit 1; }
-[ -n "$DOMAIN" ]     || { echo "必须指定 DOMAIN，例如 DOMAIN=simonfu.xin" >&2; exit 1; }
+# 用来定位站点的名字：给 SITE_NAME 或 DOMAIN 都行，填该站点的任一域名。
+LOOKUP="${SITE_NAME:-${DOMAIN:-}}"
 
-log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
+DEPLOY_USER="${DEPLOY_USER:-blog}"
+REPO_DIR="${REPO_DIR:-/srv/blog/repo}"
+BRANCH="${BRANCH:-main}"
+WEB_ROOT_EXPLICIT="${WEB_ROOT:-}"
+
+[ "$(id -u)" -eq 0 ] || { echo "请用 root 执行（sudo）" >&2; exit 1; }
+[ -n "$LOOKUP" ]     || { echo "必须指定 SITE_NAME 或 DOMAIN，例如 DOMAIN=simonfu.xin" >&2; exit 1; }
+
+log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
+warn() { printf '\033[1;33m  ! %s\033[0m\n' "$*" >&2; }
 
 # ------------------------------------------------------------
 # 0. 环境自检
 # ------------------------------------------------------------
 [ -d /www/server/panel ] || { echo "没找到宝塔面板（/www/server/panel）。若你不是宝塔环境，请用 deploy/DEPLOY.md 那套。" >&2; exit 1; }
 [ -x "$BT_NGINX" ]       || { echo "没找到宝塔的 nginx：$BT_NGINX" >&2; exit 1; }
+
+# ------------------------------------------------------------
+# 0.5 自动识别站点
+# ------------------------------------------------------------
+# 宝塔用"添加站点时填的第一个域名"命名：
+#   · vhost 配置   /www/server/panel/vhost/nginx/<第一个域名>.conf
+#   · 伪静态文件   /www/server/panel/vhost/rewrite/<第一个域名>.conf
+#   · 站点根目录   /www/wwwroot/<第一个域名>
+# 从外部（或从面板列表）看不出第一个域名是什么，猜错会把文件发到错误目录，
+# 所以这里直接去 vhost 里查：找到 server_name 含 $LOOKUP 的那个站点，读它的 root。
+DETECTED_ROOT=""
+DETECTED_NAME=""
+
+detect_site() {
+  local conf line tok root name
+  [ -d "$BT_VHOST_DIR" ] || return 1
+  for conf in "$BT_VHOST_DIR"/*.conf; do
+    [ -f "$conf" ] || continue
+    # 逐个 token 精确比对，不用正则 —— 避免把带点的 IP 当通配符匹配。
+    while IFS= read -r line; do
+      for tok in $line; do
+        [ "$tok" = "$LOOKUP" ] || continue
+        root=$(sed -nE 's/^[[:space:]]*root[[:space:]]+([^;]+);.*/\1/p' "$conf" | head -1)
+        name=$(basename "$conf" .conf)
+        if [ -n "$root" ] && [ -d "$root" ]; then
+          DETECTED_ROOT="$root"
+          DETECTED_NAME="$name"
+          return 0
+        fi
+      done
+    done < <(sed -nE 's/^[[:space:]]*server_name[[:space:]]+([^;]*);.*/\1/p' "$conf")
+  done
+  return 1
+}
+
+if detect_site; then
+  REWRITE_NAME="$DETECTED_NAME"
+  WEB_ROOT="${WEB_ROOT_EXPLICIT:-$DETECTED_ROOT}"
+else
+  REWRITE_NAME="$LOOKUP"
+  WEB_ROOT="${WEB_ROOT_EXPLICIT:-/www/wwwroot/$LOOKUP}"
+  warn "没在 $BT_VHOST_DIR 里找到 server_name 含「$LOOKUP」的站点。"
+  warn "如果站点还没在面板里建好，请先建站再重跑本脚本。"
+  warn "现在按根目录 $WEB_ROOT 继续（伪静态文件名按 $REWRITE_NAME.conf）。"
+fi
+
+log "站点：$REWRITE_NAME    根目录：$WEB_ROOT"
+
 [ -d "$WEB_ROOT" ] || {
   cat >&2 <<EOF
+
 站点目录不存在：$WEB_ROOT
 
 请先在面板里建站：
-  网站 → 添加站点 → 域名 $DOMAIN → PHP 版本选「纯静态」→ 不建数据库/FTP
-建完再重跑本脚本。
+  网站 → 添加站点 → 域名一行一个，把这个站点的域名都填上
+  （例如 43.108.100.116、simonfu.xin、www.simonfu.xin）
+  → PHP 版本选「纯静态」→ 不建数据库/FTP
+建完再重跑本脚本。也可以用 WEB_ROOT=/path 手工指定根目录。
 EOF
   exit 1
 }
@@ -105,9 +163,18 @@ find "$WEB_ROOT" -type f -exec chmod 664 {} +
 # ------------------------------------------------------------
 # 5. 把站点规则追加进"伪静态"（幂等：已有标记就跳过）
 # ------------------------------------------------------------
-REWRITE_FILE="$BT_REWRITE_DIR/$DOMAIN.conf"
+VHOST_CONF="$BT_VHOST_DIR/$REWRITE_NAME.conf"
+REWRITE_FILE="$BT_REWRITE_DIR/$REWRITE_NAME.conf"
 SNIPPET="$REPO_DIR/deploy/bt/nginx-locations.conf"
 MARKER="# ==== P3_blog 规则开始"
+
+# 规则必须放在面板自带 location 之前才生效（nginx 正则 location 先出现先匹配）。
+# 伪静态文件正是 include 在 server 块最前端的，所以放这里；若这个 vhost 没
+# include 它，规则会静默失效（posts.js 会被面板默认规则缓存 12 小时）——必须查。
+if [ -f "$VHOST_CONF" ] && ! grep -qF "vhost/rewrite/$REWRITE_NAME.conf" "$VHOST_CONF"; then
+  warn "$VHOST_CONF 里没有 include 伪静态文件，规则可能不生效。"
+  warn "请在面板里：网站 → $REWRITE_NAME → 设置 → 伪静态 → 随便保存一次，再重跑本脚本。"
+fi
 
 log "写入伪静态规则：$REWRITE_FILE"
 install -d -m 755 "$BT_REWRITE_DIR"
@@ -132,7 +199,7 @@ if ! "$BT_NGINX" -t; then
   if ! "$BT_NGINX" -t; then
     cat >&2 <<EOF
 
-配置校验失败。请打开面板：网站 → $DOMAIN → 设置 → 伪静态，
+配置校验失败。请打开面板：网站 → $REWRITE_NAME → 设置 → 伪静态，
 删掉「P3_blog 规则开始」到「P3_blog 规则结束」之间的内容，再重跑本脚本。
 最常见的原因是主配置里已经有生效的 error_page 404 —— 那种情况下
 删掉片段里的 error_page 那一行即可。
@@ -156,21 +223,23 @@ sudo -u "$DEPLOY_USER" env REPO_DIR="$REPO_DIR" WEB_ROOT="$WEB_ROOT" BRANCH="$BR
 cat <<EOF
 
 ============================================================
-服务器侧完成。剩下两件事在浏览器里做：
+服务器侧完成。现在是 HTTP 可访问状态（IP 和域名都能打开，
+域名解析生效之前只有 IP 可用）。
 
-1) 面板 → 网站 → $DOMAIN → SSL
-   → Let's Encrypt → 勾选 $DOMAIN 和 www.$DOMAIN → 申请
-   → 打开「强制 HTTPS」
-   （申请失败多半是 80 端口没通：先查云厂商安全组 + 面板「安全」页放行 80/443）
-
-2) 面板 → 网站 → $DOMAIN → 设置 → 伪静态
+1) 面板 → 网站 → $REWRITE_NAME → 设置 → 伪静态
    确认能看到「P3_blog 规则开始 / 结束」那一段。
+
+2) 域名解析生效后（域名要先完成实名认证、解除 clientHold，再加 A 记录），
+   面板 → 网站 → $REWRITE_NAME → SSL → Let's Encrypt
+   → 勾选域名 → 申请 → 打开「强制 HTTPS」。
+   域名没就绪前不要去点，Let's Encrypt 会失败并触发速率限制。
 
 以后发布（本地 git push 完，在本地 Windows 上执行）：
    ssh $DEPLOY_USER@43.108.100.116 blog-publish
 
+站点：      $REWRITE_NAME
 站点根目录：$WEB_ROOT
 发布源：    $REPO_DIR
-日志：      面板 → 网站 → $DOMAIN → 日志，或 /www/wwwlogs/$DOMAIN.log
+日志：      面板 → 网站 → $REWRITE_NAME → 日志，或 /www/wwwlogs/$REWRITE_NAME.log
 ============================================================
 EOF

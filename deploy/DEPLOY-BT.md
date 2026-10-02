@@ -8,11 +8,140 @@
 | --- | --- |
 | 域名 | `simonfu.xin`（+ `www.simonfu.xin` 作为别名） |
 | 服务器公网 IP | `43.108.100.116` |
-| 地域 | 境外 → **不需要 ICP 备案**，DNS 生效即可访问 |
+| 地域 | 境外 → **不需要 ICP 备案** |
 | 面板 | 宝塔（nginx 由面板管理，证书在面板申请） |
 | 站点根目录 | `/www/wwwroot/simonfu.xin` |
 | 发布源（git 镜像） | `/srv/blog/repo` |
 | 发布用户 | `blog`（在 `www` 组里，用于写入站点目录） |
+
+---
+
+## ⚠️ 当前真正的阻塞点：域名处于 clientHold
+
+2026-10-02 实测（RDAP 记录，注册商阿里云 / HiChina）：
+
+| 查到的事实 | 值 |
+| --- | --- |
+| 域名状态 | **`client hold`** ← 注册商暂停了解析，这才是 DNS 返回 NXDOMAIN 的原因 |
+| 注册时间 | 2026-10-02 11:21 UTC（当天刚注册） |
+| 到期时间 | 2027-10-02 |
+| NS | `dns7.hichina.com` / `dns8.hichina.com`（= 阿里云云解析） |
+
+**`clientHold` 的含义**：注册局那边根本没有这个域名的 NS 记录，所以任何解析请求
+都得到 NXDOMAIN —— 不是"你还没加 A 记录"那么简单，**现在加 A 记录也不会生效**。
+
+新注册的国内域名出现 clientHold，最常见的原因是**实名认证未完成**（阿里云对未实名
+域名会暂停解析）。处理顺序：
+
+1. 登录阿里云 → 域名 → 域名列表 → `simonfu.xin`，看状态提示
+2. 完成**实名认证**（上传证件；一般几小时内通过，慢的到 1 个工作日）
+3. 认证通过后 `clientHold` 解除，NS 生效，**这时才轮到下面第 0 步加 A 记录**
+
+验证解除：
+
+```powershell
+Resolve-DnsName simonfu.xin -Type NS -Server 8.8.8.8
+# 能返回 dns7.hichina.com / dns8.hichina.com 就说明 clientHold 已解除
+```
+
+---
+
+## 方案 A（推荐）：先用 IP 上线，域名就绪后再切
+
+**`clientHold` 只挡域名，不挡 IP。** 站点是纯静态、全相对路径、没有任何
+`canonical` / `og:url` 硬编码 —— 我逐页核对过 5 个公开 HTML 的资源引用，缺失为 0。
+所以**同一份产物**在 IP 下和域名下表现完全一致，切换时**不需要重新发布**。
+
+唯一代价：**没有 HTTPS**。Let's Encrypt 不为裸 IP 签证书（2025 年有过 IP 证书的
+短期试点，宝塔面板不支持这套流程），所以 IP 阶段是纯 HTTP，浏览器会显示"不安全"。
+对公开博客可接受，但别在这上面提交敏感信息。
+
+纯 HTTP 下功能是否完整？我查过了：全站唯一的 secure-context 依赖是 `pages.js:160`
+的复制按钮，而代码里**已经显式降级**到 `document.execCommand('copy')`，注释就写着
+"http:// 局域网地址" —— 作者本来就考虑过这种场景。没有 Service Worker、没有
+`getUserMedia`、没有 `crypto.subtle`。
+
+### 怎么建站（关键：第一个域名决定根目录名）
+
+宝塔 → 网站 → 添加站点，**域名一栏填三个（换行分隔，IP 放第一个）**：
+
+```
+43.108.100.116
+simonfu.xin
+www.simonfu.xin
+```
+
+PHP 版本选「纯静态」，不建数据库/FTP。这样：
+
+* 现在就能用 `http://43.108.100.116/` 访问
+* 站点根目录 = `/www/wwwroot/43.108.100.116`，伪静态文件 = `43.108.100.116.conf`
+* 域名一解析通就自动生效，**不用再改面板**
+
+> 如果面板不接受 IP 作站点域名：先随便填 `simonfu.xin` 把站建出来，然后在
+> 网站 → 设置 → 配置文件里把 `server_name` 那行改成
+> `server_name simonfu.xin www.simonfu.xin 43.108.100.116;`。
+> 告诉我一声我也可以帮你改。
+
+### 然后一条命令
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File deploy\deploy-from-windows.ps1 -IpOnly -All
+```
+
+`-IpOnly` 做的事：跳过 DNS 检查（域名还没解析），站点名用 IP，校验
+`http://43.108.100.116/`。443 在这个模式下不作为失败条件。
+
+### 域名就绪后切换（3 步，不用重新发布）
+
+1. 阿里云实名认证通过 → `clientHold` 解除
+2. 云解析加两条 A 记录（`@` 和 `www` → `43.108.100.116`）
+3. 面板 → 网站 → 设置 → SSL → Let's Encrypt → 申请 → 打开「强制 HTTPS」
+
+---
+
+## 一键部署助手（Windows 侧）
+
+`deploy/deploy-from-windows.ps1` 把"从你这台机器能自动化的部分"串起来了：
+预检 → 推送 `deploy/` 到 GitHub → SSH 到服务器跑引导 → 验证公网页面
+（含 `/admin/` 必须 404）。
+
+> 你这台机器的 PowerShell **禁止运行脚本**（实测报 `UnauthorizedAccessException`），
+> 所以必须带 `-ExecutionPolicy Bypass`：
+
+```powershell
+# 只做预检 + 验证（只读，默认行为）
+powershell -NoProfile -ExecutionPolicy Bypass -File deploy\deploy-from-windows.ps1
+
+# 前置条件都就绪后，跑全流程
+powershell -NoProfile -ExecutionPolicy Bypass -File deploy\deploy-from-windows.ps1 -All
+```
+
+脚本不保存也不询问任何密码，SSH 认证由 `ssh` 自己交互。DNS、安全组、面板建站
+这三件事只能在浏览器里做，脚本会在预检里明确告诉你缺哪一个。
+
+> ⚠️ 这个 `.ps1` 文件**必须保存为 UTF-8 with BOM**。你这台机器是 Windows
+> PowerShell 5.1，它会把无 BOM 的 UTF-8 当 ANSI 读，中文注释被解码错后会
+> **吞掉换行**，直接导致 `语法错误: 函数参数列表中缺少"）"`。实测踩过一次：
+> 用某些编辑器（或脚本）改完文件后 BOM 会丢失。
+
+```powershell
+# BOM 丢失时一条命令补回来
+$p='deploy\deploy-from-windows.ps1'; $b=[IO.File]::ReadAllBytes($p)
+if (-not ($b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)) { [IO.File]::WriteAllBytes($p, ([byte[]](0xEF,0xBB,0xBF))+$b) }
+```
+
+---
+
+## 服务器现状（2026-10-02 实测）
+
+| 探测项 | 结果 | 说明 |
+| --- | --- | --- |
+| TCP 80 | 通 | nginx 在跑，但返回的是**默认页**（2017 年的 `index.html`）→ 还没为这个域名建站 |
+| TCP 443 | 通（拒绝连接） | 端口可达但**没有监听** → 还没配 SSL，属正常 |
+| TCP 22 | 通 | SSH 接受**密码**认证；本机 `id_ed25519` 公钥**尚未**装到服务器 |
+| TCP 8888 | 通 | ⚠️ 宝塔面板暴露在公网 —— 见文末安全提醒 |
+
+---
 
 整体链路：
 
@@ -121,18 +250,30 @@ DOMAIN=simonfu.xin bash /srv/blog/repo/deploy/bin/blog-bootstrap-bt.sh
 
 脚本会打印站点已发布的 commit。此时访问 `http://simonfu.xin` 应该已经能看到首页。
 
-### 在本地配一把免密发布（建议）
+### 在本地配一把免密登录（建议，也是让我能替你操作服务器的前提）
+
+你机器上已经有密钥（`~/.ssh/id_ed25519`，注释 `simon-blog`），但**服务器还不认它**
+（实测 `Permission denied (publickey)`）。Windows 版 OpenSSH **没有 `ssh-copy-id`**，
+用下面这条 PowerShell 命令装公钥，它会提示你输一次服务器密码：
 
 ```powershell
-ssh-keygen -t ed25519          # 如果还没有密钥
-ssh-copy-id blog@43.108.100.116
-ssh blog@43.108.100.116 blog-publish    # 应直接打印 published <sha>
+# 装给 root：我（或你自己）才能在服务器上跑引导脚本
+$key = Get-Content "$env:USERPROFILE\.ssh\id_ed25519.pub"
+ssh root@43.108.100.116 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$key' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && echo KEY_INSTALLED"
 ```
 
-没有 `ssh-copy-id` 的话：
+看到 `KEY_INSTALLED` 后验证：
 
 ```powershell
-type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh root@43.108.100.116 "install -d -m 700 -o blog -g blog /home/blog/.ssh; cat >> /home/blog/.ssh/authorized_keys; chown blog:blog /home/blog/.ssh/authorized_keys; chmod 600 /home/blog/.ssh/authorized_keys"
+ssh -o BatchMode=yes root@43.108.100.116 "echo OK"
+```
+
+日常发布用的是 `blog` 用户（引导脚本会创建它）。装了 root 的密钥之后，
+`blog` 的密钥可以由引导脚本或一条 root 命令代装：
+
+```powershell
+ssh root@43.108.100.116 "install -d -m 700 -o blog -g blog /home/blog/.ssh && cat >> /home/blog/.ssh/authorized_keys && chown blog:blog /home/blog/.ssh/authorized_keys && chmod 600 /home/blog/.ssh/authorized_keys" < "$env:USERPROFILE\.ssh\id_ed25519.pub"
+ssh blog@43.108.100.116 blog-publish    # 应直接打印 published <sha>
 ```
 
 ---
