@@ -12,7 +12,36 @@ node .preview/serve.mjs                     # http://127.0.0.1:8848
 node .preview/verify-dock.mjs               # 17 组断言 + 截图（时钟/黑胶/倾斜/拖拽/重置）
 node .preview/check-layout.mjs              # 15 种窗口尺寸的溢出与重叠体检
 node .preview/check-mobile-rm.mjs           # 移动端折叠展开 / reduced-motion / 二次入水
+node .preview/verify-pages.mjs              # 内页 108 项功能断言 + 截图（关于我/归档/详情/404）
+node .preview/verify-geo.mjs                # 极简几何页 47 项视觉体检（底板残留 / 悬停位移 / 对比度 / 7 种宽度）
+node .preview/verify-final.mjs              # 收尾自检 35 项（资源与链接完整性 / 2560 与 320 边界 / 矮窗口抽屉 / reduced-motion / 键盘可达性）
 ```
+
+### 管理端（上传 / 更改文章）
+
+管理端自带一套验签，**不依赖浏览器**那部分可以直接跑：
+
+```powershell
+node blog-enter/server/tests/run-all.mjs          # 48 项：存储层 / 接口 / 页面草稿与别名逻辑
+```
+
+浏览器那一段需要 Chrome，并且要先把服务器起起来（它会真的点按钮、真的传图、真的删文章，
+跑完自动还原 `posts.js`）：
+
+```powershell
+node blog-enter/server/dev-server.mjs             # 站点 + 管理页，http://127.0.0.1:8848/
+node blog-enter/server/tests/verify-admin-ui.mjs  # CDP 无头 Chrome 全流程
+```
+
+两点值得记一下：
+
+- **不要用 `node --test <目录>` 跑这套测试。** `node:test` 的 runner 要 spawn 子进程，
+  在受限沙箱里会以 `spawn EPERM` 失败，看起来像"测试坏了"，其实是环境限制。
+  `run-all.mjs` 改在当前进程内 import 测试文件（见 `server/tests/harness.mjs`），零 spawn。
+- 服务端脚本（`blog-enter/server/**`）与被服务的站点无关：**删掉整个 `server/` 目录，
+  站点照常工作**。管理页文件在 `blog-enter/admin/`，不被任何公开页面引用，
+  静态托管时访问不到。
+
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
@@ -39,7 +68,64 @@ node .preview/shoot.mjs      # 静止 / 入场 / 倾斜 三张局部图（dial-r
 node .preview/tiltshot.mjs   # 强制满值倾斜，抓 dial-tilt-max / dial-tilt-opposite / page-tilt-max
 node .preview/introshot.mjs  # 点亮后连拍，检查入场动画的过冲（f0..f9 与实时 scale/rotate）
 node .preview/measure.mjs    # 打印表壳各层相对方盒的尺寸百分比，便于诊断占比/层级问题
+node .preview/shots-pages.mjs     # 内页细节图：代码块 / 引用 / 配图 / 联系方式 / 时间线 / 移动端
+node .preview/shot-entry.mjs      # 首屏（未入水那一屏）现状图 final-entry.png + 标题排版参数
+node .preview/measure-fan.mjs 1440 900   # 扇形菜单几何：半径 / 字号 / 右边界余量 / 与时钟的间隙
+node .preview/measure-contrast.mjs       # 页面头部背景的真实渲染亮度 vs 各文字色的对比度
+node .preview/audit-geo.mjs              # 极简页的"深色底板漏网"审计（旧皮肤填充色是否还压在新皮肤上）
 ```
+
+## 内页（关于我 / 归档 / 文章详情 / 404）
+
+两套皮肤，同一批 HTML 骨架：
+
+| 皮肤 | 用于 | 样式表 | 语言 |
+| --- | --- | --- | --- |
+| 深水底 | 404 | `css/pages.css` | 深青底 + 冷色玻璃面板，与"入水之后"衔接 |
+| 极简几何 | 关于我、归档、文章详情 | `css/pages.css` + `css/geo.css`（+ 文章页再加 `css/prose-light.css`） | 纯白 + 发丝线 + 描边几何，与"入水之前"的首屏衔接 |
+
+换肤的做法是**后加载一份同权重规则去覆盖**深色版，不是删掉深色样式。
+于是漏覆盖的表现不是报错，而是"某一块还是深色的"。检查手段：
+
+```powershell
+node blog-enter/server/tests/check-light-skin.mjs   # 覆盖完整性：从 article.html 实际用到的 class 反推需求
+```
+
+它做四件事：① 逐条确认 `pages.css` 里文章页用到的颜色规则都有覆盖
+（来源是 `geo.css` + `prose-light.css` 两份之和）；② 覆盖文件里不许出现深色背景；
+③ 语法高亮每个 token 在白底代码块上的对比度必须 ≥ 4.5:1（现有 6.08~8.50:1）；
+④ 职责分离 —— 正文排版不进 `geo.css`，骨架规则不重复进 `prose-light.css`。
+
+**文章页的语法高亮是另一套色值**：深色版那组（`#ff7085` / `#8fe3a8` / `#ffd479` …）
+在 `--g-paper` 上只有 1.5~2:1，等于看不清，所以不是微调而是换了一组深色 token。
+
+`geo.css` 与 `pages.css` 同优先级、靠 `<link>` 顺序取胜，所以只覆盖它声明的部分；
+**凡是要清掉旧皮肤填充色的地方必须显式写 `background: none` / `border-radius: 0` 等**
+（`verify-geo.mjs` 的审计就是专门盯这类漏网的深色底板、卡片壳与投影）。
+
+| 文件 | 作用 |
+| --- | --- |
+| `about.html` | 个人简介、技能分级、联系方式（邮箱 / GitHub / X）、圆形头像占位图 |
+| `archive.html` | 分类（单选）+ 标签（多选，可叠加）筛选；列表 / 时间线双视图 |
+| `article.html?slug=…` | 文章详情：元信息、标签、正文（代码块高亮 / 引用 / 图片）、评论区占位 |
+| `404.html` | 与站点同风格的不存在页 |
+
+几个容易踩的点，验证脚本里都有对应断言：
+
+- **扇形菜单的右边界**：半径不是"最宽那条"能塞下就算 —— 扇形里一定有一条落在
+  0°（正右方），且选中项还带 `scale(1.06)`。第一版按 max(width) 套 cos 角，
+  1440 下最右只剩 18px、1600 以上直接溢出。现在逐条解、取最小（见 `menu.js` 的
+  `layout()`），并额外把 `--spread` 折算回半径。
+- **`.fan-list` 必须是 `width: 0`**（桌面端）：里面全是绝对定位子项，容器本身就是
+  扇形的原点。但绝对定位子项在 0 宽包含块里会退化，所以 `.fan-item` 要显式
+  `width: max-content`；而窄屏的堆叠态又要把这两个值都还回 `auto`，否则菜单整条跑出屏幕。
+- **`article.html` 的两种 404**：slug 无效 → 就地渲染空状态（页面外壳与评论区都还在）；
+  路径本身不存在 → 交给托管平台的 `404.html`。
+- **浅底上的颜色档位**（`verify-geo.mjs` 用真实渲染像素复核）：
+  `--sky #38bdf8` 在白底只有 2.14:1，只配做图形；小字一律用 `--sky-deep #0284c7`
+  一档的深色（项目里叫 `--g-cyan-dk #0b6a97`，5.96:1）。
+- **`currentColor` 的陷阱**：汉堡按钮第二根横线要与第一根不同色，必须显式写颜色 ——
+  继承 `currentColor` 时它解析成按钮的 `color`，只改宽度不会变色。
 
 ## 静态检查（无需浏览器）
 
