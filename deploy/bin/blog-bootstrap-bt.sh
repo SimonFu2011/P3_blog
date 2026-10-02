@@ -154,11 +154,21 @@ install -m 755 "$REPO_DIR/deploy/bin/blog-publish.sh" /usr/local/bin/blog-publis
 #    · chown www:www —— 面板的文件管理、权限检查都按这个来
 #    · 目录 2775（setgid + 组写）—— blog 在 www 组里，能创建/替换文件
 #    · 文件 664 —— nginx 能读即可
+#    · **跳过 .user.ini**：宝塔给它加了 chattr +i（immutable 属性），
+#      连 root 都 chown/chmod 不了，会以 "Operation not permitted" 中断脚本。
+#      它是 PHP 的 open_basedir 配置，纯静态站点完全用不到，不该去动它。
 # ------------------------------------------------------------
-log "设置 $WEB_ROOT 权限（www:www，目录 2775）"
-chown -R www:www "$WEB_ROOT"
+log "设置 $WEB_ROOT 权限（www:www，目录 2775；跳过 immutable 的 .user.ini）"
+chown www:www "$WEB_ROOT"
+find "$WEB_ROOT" -mindepth 1 ! -name '.user.ini' -exec chown www:www {} +
 find "$WEB_ROOT" -type d -exec chmod 2775 {} +
-find "$WEB_ROOT" -type f -exec chmod 664 {} +
+find "$WEB_ROOT" -type f ! -name '.user.ini' -exec chmod 664 {} +
+
+# 断言：发布用户必须真的能写这个目录，否则后面的 rsync 会失败
+if ! sudo -u "$DEPLOY_USER" test -w "$WEB_ROOT"; then
+  echo "发布用户 $DEPLOY_USER 对 $WEB_ROOT 没有写权限 —— 检查它是否在 www 组、目录是否为 2775" >&2
+  exit 1
+fi
 
 # ------------------------------------------------------------
 # 5. 把站点规则追加进"伪静态"（幂等：已有标记就跳过）
