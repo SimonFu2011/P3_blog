@@ -1,12 +1,15 @@
 /* ============================================================
    菜单栏左侧的同心圆时钟 + 黑胶（第六项）
    ------------------------------------------------------------
-   · 外圈：I–XII 罗马数字 + 时针 / 分针，按现实时间走
+   · 外圈：I–XII 罗马数字 + 时针 / 分针 / 秒针，按现实时间走
      （只在"分钟"变化时改写 aria-label，避免读屏每秒刷屏）
+   · 指针造型照附图重画（.preview/handpath.py 量出的剖面 → index.html 的 d），
+     角度写进 --rot-h / --rot-m / --rot-s，rotate 由 CSS 算 —— 直接写 SVG 的
+     transform 属性会被 CSS 的 transform 盖掉，指针就不动了
    · 内圈：黑胶唱片持续旋转；中央是圆形裁切的专辑封面；歌名溢出省略
    · 2 倍尺寸：只由 CSS 的 --dial 决定，这里不写死任何像素
-   · 3D：鼠标在时钟上移动时，外层时钟（#dialClock）正倾、黑胶
-     （#dialVinyl）按相反符号倾——两者是 .dial-scene 的同级子元素，
+   · 3D：鼠标在时钟上移动时，表壳（#dialClock）正倾、黑胶（#dialVinyl）反倾、
+     指针（#dialHands）取中间值 —— 三者是 .dial-scene 的同级子元素，
      共用同一份鼠标坐标与 perspective，所以同步且互不干扰。
      背景视差（--mx/--my 取负）方向与鼠标相反、幅度更小。
      所有写入都合并到一帧 rAF 里，只改 CSS 变量，不触发布局。
@@ -31,6 +34,13 @@
 
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const pad2 = (n) => (n < 10 ? '0' + n : String(n));
+
+  /* 指针角度 → CSS 变量（真正的 rotate 在 style.css 里算）。
+     必须走变量而不是 SVG 的 transform 属性：CSS 的 transform 会整体盖掉
+     属性，旧版就是这么把三根针钉在 12 点的。 */
+  const setRot = (el, name, deg) => {
+    if (el) el.style.setProperty(name, deg.toFixed(2) + 'deg');
+  };
 
   /* 文件是不是音频：优先看 MIME，再退回扩展名（拖拽时 type 有时为空） */
   const isAudioFile = (file) => {
@@ -276,6 +286,7 @@
       this.numerals = document.getElementById('dialNumerals');
       this.hourHand = document.getElementById('dialHour');
       this.minHand = document.getElementById('dialMin');
+      this.secHand = document.getElementById('dialSec');
       this.vinyl = document.getElementById('vinyl');
       this.disc = this.el.querySelector('.vinyl-disc');
       this.cover = document.getElementById('vinylCover');
@@ -293,7 +304,7 @@
       this.syncCollapsed();
       this.resetVinyl();                 // 从一开始就转
       this.tick();
-      this.timer = window.setInterval(() => this.tick(), 1000);
+      this.loop();
       window.addEventListener('resize', () => this.syncCollapsed());
       this.setActive(false);             // 入场白场上没有它
       return true;
@@ -355,7 +366,9 @@
       g.appendChild(frag);
     },
 
-    /* 时钟：始终取现实时间；重置时也不清零时间本身（第四项第 5 条） */
+    /* 时钟：始终取现实时间；三根针的角度按真实角度算
+       （时针含分钟的零头、分针含秒的零头、秒针含毫秒的零头），
+       重置时也不清零时间本身（第四项第 5 条） */
     tick() {
       const d = new Date();
       const h = d.getHours();
@@ -363,16 +376,23 @@
       const sec = d.getSeconds();
       const hourDeg = ((h % 12) + m / 60) * 30;
       const minDeg = (m + sec / 60) * 6;
-      if (this.hourHand) {
-        this.hourHand.setAttribute('transform', 'rotate(' + hourDeg.toFixed(2) + ' ' + CX + ' ' + CY + ')');
-      }
-      if (this.minHand) {
-        this.minHand.setAttribute('transform', 'rotate(' + minDeg.toFixed(2) + ' ' + CX + ' ' + CY + ')');
-      }
+      /* 含毫秒：秒针的 CSS 过渡因此每秒"跳"一格并带一点回弹 */
+      const secDeg = (sec + d.getMilliseconds() / 1000) * 6;
+      setRot(this.hourHand, '--rot-h', hourDeg);
+      setRot(this.minHand, '--rot-m', minDeg);
+      setRot(this.secHand, '--rot-s', secDeg);
       if (this.dial && m !== this.lastMinute) {
         this.lastMinute = m;
         this.dial.setAttribute('aria-label', '时钟：当前时间 ' + pad2(h) + ':' + pad2(m));
       }
+    },
+
+    /* 每一秒对齐到整秒再 tick（setInterval 会漂，秒针会偶尔跳两格） */
+    loop() {
+      this.timer = window.setTimeout(() => {
+        this.tick();
+        this.loop();
+      }, 1000 - (Date.now() % 1000) + 4);
     },
     /* ---- 音乐信息：没有音源时走占位（第六项第 8 条） ---- */
     applyMusic() {

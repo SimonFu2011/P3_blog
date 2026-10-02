@@ -183,6 +183,19 @@ const main = async () => {
 
   // ---- 尺寸 ----
   console.log('\n[2] 尺寸（应为上一版的两倍）');
+  /* dockIn 入场动画 46% 处会 scale 到 1.09，量的时机不对就会"溢出" ——
+     先等 dock 自己的有限动画跑完（无头里 rAF 被节流，settled 不等于动画结束） */
+  const waitAnim = await js(`(async function(){
+    var dock = document.getElementById('dock');
+    var anims = (dock.getAnimations ? dock.getAnimations() : [])
+      .filter(function (a) { return (a.effect.getTiming().iterations !== Infinity); });
+    await Promise.race([
+      Promise.all(anims.map(function (a) { return a.finished.catch(function () {}); })),
+      new Promise(function (r) { setTimeout(r, 2500); })
+    ]);
+    return anims.length;
+  })()`);
+  console.log('    等 dock 的入场动画收尾：', waitAnim, '条');
   const size = await js(`(function(){
     var dock = document.getElementById('dock');
     var dial = document.getElementById('dial');
@@ -232,58 +245,83 @@ const main = async () => {
   ok(caseFit.bezelRatio < 1.02, '表圈没有溢出容器');
   ok(caseFit.sweep && caseFit.bplate, '入场扫光层与厚度侧面层都在');
 
-  // ---- 层级 ----
-  console.log('\n[4] 层级（黑胶盖住指针）');
+  // ---- 层级：指针压在黑胶之上，但整层不吃指针事件 ----
+  console.log('\n[4] 层级（指针压在黑胶之上，点击 / 拖拽仍归黑胶）');
   const layer = await js(`(function(){
     var disc = document.querySelector('.vinyl-disc');
     var clock = document.getElementById('dialClock');
     var vinyl = document.getElementById('dialVinyl');
+    var hands = document.getElementById('dialHands');
     var dr = disc.getBoundingClientRect();
-    var hand = document.elementFromPoint(dr.left + dr.width*0.5, dr.top + dr.height*0.08);
-    var center = document.elementFromPoint(dr.left + dr.width*0.5, dr.top + dr.height*0.5);
     var cls = function (el) { return el ? (el.className || el.tagName) : null; };
+    // 指针行程上的那个点（黑胶高度 8% 处）：指针层是 pointer-events: none，
+    // elementFromPoint 会跳过它 —— 命中的必须仍是黑胶
+    var hit = document.elementFromPoint(dr.left + dr.width * 0.5, dr.top + dr.height * 0.08);
+    var center = document.elementFromPoint(dr.left + dr.width * 0.5, dr.top + dr.height * 0.5);
     return {
       vinylAboveClock: !!(vinyl.compareDocumentPosition(clock) & Node.DOCUMENT_POSITION_PRECEDING),
+      handsAboveVinyl: !!(hands.compareDocumentPosition(vinyl) & Node.DOCUMENT_POSITION_PRECEDING),
       clockZ: getComputedStyle(clock).zIndex,
       vinylZ: getComputedStyle(vinyl).zIndex,
-      hand: cls(hand), center: cls(center),
-      handIsVinyl: !!(hand && hand.closest('.dial-vinyl')),
-      // 指针尖端到 r=66/240 = 27.5%，黑胶半径 23% —— 取 20% 处必定落在指针行程上
-      handOnHandPath: Math.abs(dr.height*0.08 - dr.height*0.5) < dr.height*0.275
+      handsZ: getComputedStyle(hands).zIndex,
+      handsPE: getComputedStyle(hands).pointerEvents,
+      handleClass: cls(hit), centerClass: cls(center),
+      hitIsVinyl: !!(hit && hit.closest('.dial-vinyl')),
+      centerIsVinyl: !!(center && center.closest('.dial-vinyl'))
     };
   })()`);
   console.log('   ', JSON.stringify(layer));
-  ok(layer.vinylAboveClock, 'DOM 顺序上黑胶层在时钟层之后');
-  ok(layer.vinylZ === '2' && layer.clockZ === 'auto',
-     `黑胶层显式抬升（vinyl z-index=${layer.vinylZ}，clock z-index=${layer.clockZ}）`);
-  ok(layer.handIsVinyl, '指针行程上的像素命中的是黑胶层（视觉上盖住指针）');
+  ok(layer.vinylAboveClock && layer.handsAboveVinyl, 'DOM 顺序：表壳 → 黑胶 → 指针');
+  ok(layer.vinylZ === '2' && layer.handsZ === '3' && layer.clockZ === 'auto',
+     `三层显式分层（shell=${layer.clockZ} / vinyl=${layer.vinylZ} / hands=${layer.handsZ}）`);
+  ok(layer.handsPE === 'none' && layer.hitIsVinyl && layer.centerIsVinyl,
+     '指针层不吃指针事件：指针行程上与唱片中心命中的都还是黑胶');
 
-  // ---- 指针几何：造型要细长、分针要更长 ----
-  console.log('\n[5] 指针几何（老式镂空造型）');
+  // ---- 指针几何：造型照附图（叶形时针 / 卷草分针 / 细针秒针） ----
+  console.log('\n[5] 指针几何（附图造型：叶形时针 / 镂空卷草分针 / 细针秒针）');
   const handGeo = await js(`(function(){
-    var box = function (sel) {
-      var b = document.querySelector(sel).getBoundingClientRect();
-      var d = document.getElementById('dial').getBoundingClientRect();
-      return { w: b.width, h: b.height, cy: b.top + b.height/2 - d.top - d.height/2, dial: d.width };
+    // getBBox() 是元素自己坐标系里的几何外框，不受 CSS 旋转影响 —— 量的是
+    // "针有多长、多宽"，不是"这一刻的屏幕外框"
+    var geo = function (sel) {
+      var b = document.querySelector(sel + ' .dial-hand-shape').getBBox();
+      return { w: b.width, h: b.height, x: b.x + b.width / 2, top: b.y, bottom: b.y + b.height };
     };
-    var hour = box('#dialHour');
-    var min = box('#dialMin');
+    var hour = geo('#dialHour'), min = geo('#dialMin'), sec = geo('#dialSec');
+    var subs = function (sel) {
+      return ((document.querySelector(sel + ' .dial-hand-shape').getAttribute('d') || '')
+        .match(/M/g) || []).length;
+    };
     return {
-      hourW: hour.w / hour.dial, hourH: hour.h / hour.dial,
-      minW: min.w / min.dial, minH: min.h / min.dial,
-      minOffsetY: min.cy / min.dial,
-      shapes: document.querySelectorAll('.dial-hand-shape').length,
-      bosses: document.querySelectorAll('.dial-hand-boss').length,
-      pierce: document.querySelectorAll('.dial-hand-pierce').length
+      hourW: hour.w, hourL: hour.h, minW: min.w, minL: min.h, secW: sec.w, secL: sec.h,
+      hourTop: hour.top, minTop: min.top, secTop: sec.top,
+      hourBottom: hour.bottom, minBottom: min.bottom, secBottom: sec.bottom,
+      hourMidX: hour.x, minMidX: min.x, secMidX: sec.x,
+      shapes: document.querySelectorAll('.dial-hands .dial-hand-shape').length,
+      caps: document.querySelectorAll('.dial-hand-cap').length,
+      evenOdd: document.querySelectorAll('.dial-hand-shape[fill-rule="evenodd"]').length,
+      minSubs: subs('#dialMin'), hourSubs: subs('#dialHour'),
+      hourRot: document.getElementById('dialHour').style.getPropertyValue('--rot-h'),
+      minRot: document.getElementById('dialMin').style.getPropertyValue('--rot-m'),
+      secRot: document.getElementById('dialSec').style.getPropertyValue('--rot-s')
     };
   })()`);
   console.log('   ', JSON.stringify(handGeo));
-  ok(handGeo.shapes === 2 && handGeo.bosses === 2 && handGeo.pierce === 2,
-     '时针 / 分针都是 path + 中心轴帽 + 镂空孔');
-  ok(handGeo.minH > handGeo.hourH, `分针比时针长（${handGeo.minH.toFixed(2)} > ${handGeo.hourH.toFixed(2)}）`);
-  ok(handGeo.minW < 0.12 && handGeo.hourW < 0.36,
-     `时针盘状、分针细杆（宽度上限内，宽 ${(handGeo.hourW * 100).toFixed(1)}% / ${(handGeo.minW * 100).toFixed(1)}%）`);
-  ok(handGeo.minOffsetY < -0.1, `分针向上偏置，长尾留在轴下（cy=${handGeo.minOffsetY.toFixed(2)}）`);
+  ok(handGeo.shapes === 3 && handGeo.caps === 1 && handGeo.evenOdd === 3,
+     '时针 / 分针 / 秒针都是 path（evenodd 镂空）+ 一个中心轴帽');
+  ok(handGeo.secL > handGeo.minL && handGeo.minL > handGeo.hourL,
+     `长度 秒针 > 分针 > 时针（${handGeo.secL.toFixed(1)} > ${handGeo.minL.toFixed(1)} > ${handGeo.hourL.toFixed(1)}）`);
+  // 分针最宽的地方是尾部的圆环配重（±10.4），针身本身只有 ±7
+  ok(handGeo.hourW < 12 && handGeo.minW < 22 && handGeo.secW < 9,
+     `三根针都细长（宽 ${handGeo.hourW.toFixed(1)} / ${handGeo.minW.toFixed(1)} / ${handGeo.secW.toFixed(1)} 单位）`);
+  ok(handGeo.minSubs >= 6 && handGeo.hourSubs === 1,
+     `分针有卷草与长窗镂空（${handGeo.minSubs} 段子路径），时针是实心一片`);
+  ok(Math.abs(handGeo.hourMidX - 120) < 0.6 && Math.abs(handGeo.minMidX - 120) < 0.6,
+     '两根针都关于 x=120 对称（镜像生成，不会歪）');
+  ok(Math.abs(handGeo.minTop - 26) < 3 && handGeo.minBottom > 128,
+     `分针针尖 r≈94、针尾越过圆心（top=${handGeo.minTop.toFixed(1)}，bottom=${handGeo.minBottom.toFixed(1)}）`);
+  ok(/deg$/.test(handGeo.hourRot.trim()) && /deg$/.test(handGeo.minRot.trim())
+     && /deg$/.test(handGeo.secRot.trim()),
+     `三根针的角度写进 CSS 变量（${handGeo.hourRot.trim()} / ${handGeo.minRot.trim()} / ${handGeo.secRot.trim()}）`);
 
   // ---- 3D 倾斜 + 视差 ----
   console.log('\n[6] 悬停 3D 倾斜（外层正 / 黑胶反）+ 背景视差');
@@ -583,17 +621,35 @@ const main = async () => {
      '再次点击继续播放且唱片复转');
 
   // ---- 指针 ----
-  console.log('\n[14] 指针计时逻辑不受影响');
+  console.log('\n[14] 指针计时：角度对得上现实时间，且真的转到了屏幕上');
   const hands = await js(`(function(){
+    var tf = getComputedStyle(document.getElementById('dialHour')).transform;
+    var d = new Date();
     return {
-      hour: document.getElementById('dialHour').getAttribute('transform'),
-      min: document.getElementById('dialMin').getAttribute('transform'),
-      aria: document.getElementById('dial').getAttribute('aria-label')
+      hour: document.getElementById('dialHour').style.getPropertyValue('--rot-h'),
+      min: document.getElementById('dialMin').style.getPropertyValue('--rot-m'),
+      sec: document.getElementById('dialSec').style.getPropertyValue('--rot-s'),
+      tf: tf,
+      aria: document.getElementById('dial').getAttribute('aria-label'),
+      h: d.getHours(), m: d.getMinutes(), s: d.getSeconds()
     };
   })()`);
   console.log('   ', JSON.stringify(hands));
-  ok(/rotate\(/.test(hands.hour || '') && /rotate\(/.test(hands.min || ''),
-     '时针 / 分针仍在按现实时间旋转');
+  const rotOf = (tf) => {
+    const m = (String(tf).match(/matrix3?d?\(([^)]+)\)/) || [, ''])[1].split(',').map(Number);
+    return (Math.atan2(m[1], m[0]) * 180 / Math.PI + 360) % 360;
+  };
+  const wantHour = ((hands.h % 12) + hands.m / 60) * 30;
+  const wantMin = (hands.m + hands.s / 60) * 6;
+  const gotHour = parseFloat(hands.hour);
+  const gotMin = parseFloat(hands.min);
+  const drawnHour = rotOf(hands.tf);
+  ok(Math.abs(gotHour - wantHour) < 2,
+     `时针角度＝现实时间（${gotHour.toFixed(1)}° ≈ ${wantHour.toFixed(1)}°）`);
+  ok(Math.abs(gotMin - wantMin) < 3,
+     `分针角度＝现实时间（${gotMin.toFixed(1)}° ≈ ${wantMin.toFixed(1)}°）`);
+  ok(Math.abs(drawnHour - gotHour) < 1.5,
+     `CSS 变量真的作用在指针上（计算值 ${drawnHour.toFixed(1)}° ≈ 变量 ${gotHour.toFixed(1)}°）`);
 
   // ---- ESC 重置 ----
   console.log('\n[15] ESC 重置无回归');

@@ -732,9 +732,10 @@ body.is-underwater .credit { opacity: .8; }
   perspective: 620px;
   perspective-origin: 50% 50%;
 }
-/* 两个同级 3D 层：外层时钟正倾、黑胶反倾 */
+/* 三个同级 3D 层：表壳正倾、黑胶反倾、指针取中间值 */
 .dial-clock,
-.dial-vinyl {
+.dial-vinyl,
+.dial-hands {
   position: absolute; inset: 0;
   transform-style: preserve-3d;
   transform-origin: 50% 50%;
@@ -743,7 +744,8 @@ body.is-underwater .credit { opacity: .8; }
 }
 /* 离开时复位要更"缓"一点，避免松手一刹那的硬切 */
 .dial.is-idle .dial-clock,
-.dial.is-idle .dial-vinyl { transition-duration: .5s; }
+.dial.is-idle .dial-vinyl,
+.dial.is-idle .dial-hands { transition-duration: .5s; }
 
 /* 鼠标位置 → 外层时钟 tilt；--tilt-x/--tilt-y = 方向 * 强度（带角度单位） */
 .dial-clock {
@@ -756,7 +758,17 @@ body.is-underwater .credit { opacity: .8; }
   --tilt-x: calc(var(--mx) * -8deg * var(--tilt, 1));
   --tilt-y: calc(var(--my) * 8deg * var(--tilt, 1));
   transform: rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
-  z-index: 2;                /* 该层整体压在时钟层（含指针）之上 */
+  z-index: 2;                /* 压在表壳层之上、指针层之下 */
+}
+/* 指针层：倾角取表壳（16）与黑胶（-8）之间 —— 倾斜时表壳 / 唱片 / 指针
+   是三条不同深度的线，表盘厚度与侧面因此看得出来。整层不吃指针事件，
+   黑胶的点击与拖拽落点照旧。 */
+.dial-hands {
+  --tilt-x: calc(var(--mx) * 12deg * var(--tilt, 1));
+  --tilt-y: calc(var(--my) * -12deg * var(--tilt, 1));
+  transform: rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
+  z-index: 3;
+  pointer-events: none;
 }
 
 /* 视差背景：方向与鼠标相反（--mx 取负）、幅度远小于鼠标位移，
@@ -972,32 +984,52 @@ body.is-underwater .credit { opacity: .8; }
   stroke-width: .7px;
 }
 
-/* ---- 指针：造型参照附图的老式镂空指针 ----
-   时针 = 卷草纹镂空盘 + 水滴形短尖 + 长尾配重；分针 = 细长尖杆 + 叶形头。
-   深色填 + 极细冷光描边（参考图也是近黑金属）。两者都在时钟层内，
-   因此仍被黑胶层整块盖住（第六项第 2 条），只有 3D 倾斜时因 Z 分层才露出侧影。 */
+/* ---- 指针：造型照附图重画 ----
+   分针 = 镂空卷草 + 圆环配重 + 长针（附图那根 filigree 针，长 94）；
+   时针 = 细杆 + 叶形腹 + 长尖（附图那根 spade 针，长 70）；
+   秒针 = 细针 + 尾部小圆环（长 100）。路径数据在 index.html，
+   顶点由 .preview/handpath.py 按附图量出的"沿轴宽度剖面"生成。
+
+   旋转必须走 CSS 变量：
+   在 SVG 元素上，CSS 的 transform 会整体盖掉 transform 属性。旧版把
+   `transform: translateZ(...)` 写在 .dial-hand-h/-m 上、把角度写成属性，
+   于是三根针永远停在 12 点 —— 这正是"指针不动"的根因。 */
+.dial-hand {
+  transform-box: view-box;      /* 原点按 viewBox 算：50% 50% = 表盘圆心 */
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+.dial-hand-h { transform: translateZ(2px) rotate(var(--rot-h, 0deg)); }
+.dial-hand-m { transform: translateZ(9px) rotate(var(--rot-m, 0deg)); }
+/* 秒针在最上面，跳秒带一点回弹：老式石英钟的手感 */
+.dial-hand-s {
+  transform: translateZ(16px) rotate(var(--rot-s, 0deg));
+  transition: transform .22s cubic-bezier(.2, 1.5, .4, 1);
+}
+/* 针身：铁黑的实心 + 一道极细冷边 + 一圈冷光晕。
+   填充必须够黑 —— 指针有一大半行程落在米白盘面上，那里就得是老式铁针的颜色；
+   落在深色唱片上的那一段则靠"冷光晕"（drop-shadow 先晕后影）把轮廓托出来，
+   光晕压在白盘上又看不见，两边都不吃亏。 */
 .dial-hand-shape {
   fill: #0b1420;
-  stroke: rgba(160, 214, 245, .45);
-  stroke-width: .55;
+  stroke: rgba(186, 228, 250, .5);
+  stroke-width: .34;
   stroke-linejoin: round;
-  filter: drop-shadow(0 1.6px 2.4px rgba(0, 0, 0, .55));
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 1.2px rgba(186, 228, 250, .9))
+          drop-shadow(0 1.6px 2.4px rgba(0, 0, 0, .5));
 }
-.dial-hand-boss { fill: url(#dialBoss); stroke: rgba(233, 240, 245, .55); stroke-width: .5; }
-.dial-hand-pierce { fill: rgba(3, 18, 30, .92); }
-.dial-hand-h { transform: translateZ(0); }
-.dial-hand-m { transform: translateZ(7px); }
-.dial-pivot { fill: #081524; stroke: #e9f0f5; stroke-width: 1.6; }
-.dial-pivot-dot { fill: var(--red); }
+/* 中心轴帽：压住三根针的根部 */
+.dial-hand-cap { fill: #e9f0f5; stroke: rgba(3, 20, 32, .55); stroke-width: .5; }
 
 /* ---- 黑胶层 ---- */
 .dial-vinyl { pointer-events: none; }
 .vinyl { position: absolute; inset: 0; display: grid; place-items: center; }
 .vinyl-disc {
   position: relative; display: block;
-  /* 46%：比表盘内缘（52）略大一圈，正好把指针整段盖住，
-     接缝处也因此不会露出底下的盘面 */
-  width: 46%; aspect-ratio: 1 / 1;
+  /* 44%：正好盖住盘面中心挖掉的 r<52 那一块（表盘内缘圈 r=51.5），
+     指针已经改到黑胶之上，唱片不必再靠"盖住指针"来让开中心 */
+  width: 44%; aspect-ratio: 1 / 1;
   border-radius: 50%;
   cursor: pointer;
   pointer-events: auto;      /* 整块不可点，只有唱片（播放 / 暂停）可点 */
@@ -1048,7 +1080,7 @@ body.is-underwater .credit { opacity: .8; }
    只有拖拽期间 .dial.is-dragging 才接受 drop。 */
 .dial-drop {
   position: absolute; left: 50%; top: 50%;
-  width: 46%; aspect-ratio: 1 / 1;
+  width: 44%; aspect-ratio: 1 / 1;
   translate: -50% -50%;
   border-radius: 50%;
   pointer-events: none;
@@ -1194,6 +1226,7 @@ body.is-page-hidden .bubble {
 @media (hover: none), (pointer: coarse) {
   .dial-clock,
   .dial-vinyl,
+  .dial-hands,
   .dial-parallax { transform: none !important; }
 }
 
@@ -1201,6 +1234,7 @@ body.is-page-hidden .bubble {
 @media (prefers-reduced-motion: reduce) {
   .dial-clock,
   .dial-vinyl,
+  .dial-hands,
   .dial-parallax { transform: none !important; }
   .dial-rings i,
   .dial-halo { animation: none !important; }

@@ -16,6 +16,8 @@ acl-report-*
 !.preview/check.py
 !.preview/preview-dial.py
 !.preview/radius-check.py
+!.preview/handpath.py
+!.preview/handprofile.py
 !.preview/serve.mjs
 !.preview/verify-dock.mjs
 !.preview/check-layout.mjs

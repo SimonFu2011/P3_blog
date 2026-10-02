@@ -47,7 +47,22 @@ node .preview/measure.mjs    # 打印表壳各层相对方盒的尺寸百分比�
 python .preview/check.py           # SVG 合法性 / url(#id) 引用 / 图层顺序 / JS↔HTML↔CSS 交叉引用 / CSS 括号
 python .preview/preview-dial.py    # 用 PIL 把表盘近似渲染成 dial-preview.png
 python .preview/radius-check.py    # 表盘各圆环的半径与线宽覆盖关系
+python .preview/handpath.py        # 三根指针的路径生成（见下）
+python .preview/handprofile.py     # 从附图量出指针的"沿轴宽度剖面"（调造型时用）
 ```
+
+### 指针造型（`handpath.py`）
+
+指针不是手画的，而是按附图量出来的比例生成的：
+
+1. `handprofile.py` 给出附图里两根针的轴（转轴 → 针尖），沿轴每 1.6% 取一条垂线，
+   量出左右边界的宽度剖面 —— 时针 592px、分针 678px（附图里的像素长）。
+2. `handpath.py` 把剖面归一化后乘上目标长度（时针 70 / 分针 94 / 秒针 100 用户单位），
+   节点走 Catmull-Rom 转三次贝塞尔，左右镜像，镂空用 `fill-rule="evenodd"` 的子路径。
+   脚本同时输出 `hand-paths.txt`（粘进 index.html 的 `d`）与
+   `hands-{hour,minute,second,all}.png`（由生成的 `d` 采样渲染的预览）。
+
+改造型只要改脚本里的 `*_PROFILE` 节点表，重跑后把 `hand-paths.txt` 覆盖回 index.html。
 
 `preview-dial.py` 是"几何 + 配色"的近似，字体、混合模式、渐变都做了简化 ——
 有浏览器时应以 `verify-dock.mjs` 的截图为准。
@@ -63,10 +78,20 @@ python .preview/radius-check.py    # 表盘各圆环的半径与线宽覆盖关�
 | `.dial-q` | r 85，线宽 12（79~91） | 四象限分段色环 |
 | `.dial-numeral` | r 76 | 罗马数字 |
 | `.dial-rail` | r 53~90，每 3° 一根 | 放射状阴影线 |
-| `.vinyl-disc` | 方盒的 46% | 黑胶，压在指针之上 |
+| `.vinyl-disc` | 方盒的 44% | 黑胶，r=52.8（正好盖住盘面挖空） |
+| `#dialHour` | 长 70（针尾 -10.85） | 叶形时针 |
+| `#dialMin` | 长 94（针尾 -14.1） | 镂空卷草分针 |
+| `#dialSec` | 长 100（针尾 -24） | 细针秒针 |
 
-倾斜：外层满值 `rotateX/rotateY` 16deg、黑胶反向 8deg（CSS 里的 `--tilt-x/--tilt-y`
-由 `dock.js` 写入的 `--mx/--my` 推导），透视 620px。
+层级：`.dial-scene` 里三层同级子元素 —— `.dial-clock`（表壳，z=auto）、
+`.dial-vinyl`（黑胶，z=2）、`.dial-hands`（指针，z=3，`pointer-events: none`）。
+
+倾斜：外层满值 `rotateX/rotateY` 16deg、黑胶反向 8deg、指针层取中间 12deg（CSS 里的
+`--tilt-x/--tilt-y` 由 `dock.js` 写入的 `--mx/--my` 推导），透视 620px。
+
+指针角度不走 SVG 的 `transform` 属性，而是 `dock.js` 写 `--rot-h / --rot-m / --rot-s`、
+CSS 算 `rotate()` —— 在 SVG 元素上 CSS 的 `transform` 会整体盖掉属性，
+写成属性的话三根针会永远停在 12 点。
 
 ## 产物
 
