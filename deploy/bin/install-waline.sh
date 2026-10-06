@@ -189,14 +189,11 @@ WALINE_ADMIN_MODULE_ASSET_URL=$SITE_URL_VALUE/comments-assets/waline-admin.js
 # SMTP_PASS=<SMTP 授权码>
 # SMTP_SECURE=true
 #
-# 个人 outlook.com / hotmail.com（要开两步验证后生成"应用密码"）
-# SMTP_SERVICE=Hotmail            # → smtp-mail.outlook.com:587 STARTTLS
-# SMTP_USER=you@outlook.com
-# SMTP_PASS=<应用密码>
-#
-# ⚠️ 工作/学校的 Microsoft 365 **不行**：Exchange Online 从 2026-04-30 起
-#    全部拒绝 SMTP 基本认证（550 5.7.30），只剩 OAuth，而 Waline 只支持
-#    用户名+密码。详见 blog-enter/ADMIN.md 第 8.3.1 节。
+# 个人 outlook.com / hotmail.com —— **别用**：2025–2026 年新注册的账号 SMTP AUTH
+# 被服务端直接关掉（SmtpClientAuthentication is disabled for the Mailbox，用户侧
+# 没有开关）；工作/学校的 Microsoft 365 则是 2026-04-30 起 100% 拒绝 SMTP 基本
+# 认证（550 5.7.30），只剩 OAuth —— 而 Waline 只支持用户名+密码，两条路都走不通。
+# 详见 blog-enter/ADMIN.md 第 8.3.1 节。
 #
 # ⚠️ 设了 SMTP_SERVICE 时，SMTP_HOST / SMTP_PORT / SMTP_SECURE 一律被忽略。
 # SENDER_NAME=SIMON 的个人站

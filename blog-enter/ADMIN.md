@@ -226,41 +226,56 @@ bash deploy/bin/check-waline-smtp.sh you@qq.com   # 再真发一封
 人话（535 = 授权码/应用密码不对；`550 5.7.30` = Exchange Online 停用了基本认证；
 ETIMEDOUT = 端口不通；TLS 模式配反了……）。
 
-### 8.3.1 邮件服务商：Outlook 有两种命运，别选错那个
+### 8.3.1 邮件服务商：**别用 Outlook**（它不是"难配"，是走不通）
 
-| 你的邮箱 | 能不能给 Waline 用 | 怎么配 |
+结论先说：Outlook / Hotmail 这条路对 Waline 是**死的**，而且是两件事叠在一起：
+
+| 账号类型 | 现状（2026-10 查证） | 对 Waline 的后果 |
 | --- | --- | --- |
-| 个人 `@outlook.com` / `@hotmail.com` / `@live.com` | **能** | 开两步验证 → 账户「安全 → 高级安全选项 → 应用密码」生成一个，拿它当 `SMTP_PASS` |
-| 工作 / 学校的 Microsoft 365（含挂在 M365 上的自有域名） | **基本不能** | Exchange Online 已停用 SMTP 的**基本认证**（2026-03-01 起逐步拒绝、2026-04-30 起全部拒绝，报 `550 5.7.30 Basic authentication is not supported for Client Submission`），只剩 OAuth；而 Waline 只支持"用户名+密码"（源码里就是 `auth: { user, pass }`），**不支持 OAuth** |
-| QQ / 163 | 能 | 用**授权码**（不是登录密码），465 + SSL。`SMTP_SERVICE=QQ` / `163` |
-| 阿里云邮件推送 / SendGrid 之类 | 能，而且最稳 | 换成 `SMTP_HOST` + `SMTP_PORT`；代价是要先有一个能验证的发件域名 |
+| 个人 `@outlook.com` / `@hotmail.com` / `@live.com` | 2025–2026 年新注册的账号 **SMTP AUTH 被服务端直接关掉**，连接报 `SmtpClientAuthentication is disabled for the Mailbox`；**用户侧没有开关**（Outlook.com 设置里根本不出现 Authenticated SMTP 这一项）。只有更老的老账号可能还开着 | 用户名+密码这种认证被服务端拒绝 |
+| 工作 / 学校的 Microsoft 365（含挂在 M365 上的自有域名） | Exchange Online 从 2026-03-01 起逐步、**2026-04-30 起 100% 拒绝 SMTP 基本认证**，错误是 `550 5.7.30 Basic authentication is not supported for Client Submission`；只剩 OAuth 2.0，而且官方明确讲**应用密码也一起失效、不给例外** | Waline 只支持 `auth: { user, pass }`（源码 `src/service/notify.js` 里就是这么写的），**不支持 OAuth** |
 
-个人 Outlook 就这两种写法，**二选一**：
+**所以换个口令、开两步验证、生成应用密码，全都没用** —— 卡住的不是密码，是服务端
+不再接受这种认证方式。真要用 Outlook，只能自己搭一个支持 OAuth2 的中转
+（给 Waline 打插件或前置代理），比换邮箱麻烦得多。
+
+能用的选择（服务器侧连通性都实测过）：
+
+| 邮箱 / 服务 | 配置 | 备注 |
+| --- | --- | --- |
+| **QQ 邮箱**（推荐） | `SMTP_SERVICE=QQ` + **授权码**（QQ 邮箱 → 设置 → 账户 → POP3/SMTP 服务 → 生成授权码），465 + SSL | 最省事；发给 QQ 收件人几乎不进垃圾箱 |
+| **163 邮箱** | `SMTP_SERVICE=163` + **授权码** | 同理，163 ↔ QQ 互投也稳 |
+| 阿里云邮件推送 / SendGrid / 腾讯云 SES | `SMTP_HOST` + `SMTP_PORT` | 最稳、有投递统计，按量付费；代价是要先有一个**能验证的发件域名**（`simonfu.xin` 现在还是 NXDOMAIN，得先把域名用起来） |
+| Gmail | `SMTP_HOST=smtp.gmail.com`、`SMTP_PORT=587` + 应用专用密码 | 网络通（实测这台服务器 587 可达），但国内直连 Google 不稳，发给 QQ/163 也容易进垃圾箱 —— 不推荐 |
+
+实测的端口情况：QQ/163 的 465、Outlook 的 587、Gmail 的 587、阿里云推送的 465
+**全部可达**；**25 端口不通**（阿里云默认封），所以任何方案都必须用
+465（`SMTP_SECURE=true`）或 587（`SMTP_SECURE=false`）。
+
+配置写法（以 QQ 为例，二选一）：
 
 ```ini
 # 写法一：用 nodemailer 的预设（推荐，省得记端口）
-SMTP_SERVICE=Hotmail            # 别名 Outlook / Outlook.com / Hotmail.com 都认
-SMTP_USER=you@outlook.com
-SMTP_PASS=<应用密码>
+SMTP_SERVICE=QQ
+SMTP_USER=you@qq.com
+SMTP_PASS=<授权码>
+SMTP_SECURE=true                # 预设已含 465+SSL，这行写不写都一样
 
 # 写法二：显式写主机与端口
-SMTP_HOST=smtp-mail.outlook.com
-SMTP_PORT=587
-SMTP_SECURE=false
+SMTP_HOST=smtp.qq.com
+SMTP_PORT=465
+SMTP_SECURE=true
 ```
 
 ⚠️ **设了 `SMTP_SERVICE` 时，`SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` 全部被忽略** ——
-端口由 nodemailer 的预设决定（`Hotmail` → `smtp-mail.outlook.com:587`，STARTTLS）。
-两边都写、还写得不一样，症状就是"我明明改了端口，怎么没生效"。
+端口由 nodemailer 的预设决定。两边都写、还写得不一样，症状就是
+"我明明改了端口，怎么没生效"。
 
-另外三条实测：
+另外两条：
 
-* `SENDER_EMAIL` 必须与 `SMTP_USER` **相同** —— Microsoft 不允许用别的地址发信。
-* 这台服务器是阿里云 IP，Microsoft 可能把首次登录判成"异常活动"而拒绝（也可能
-  要你去账户里确认一次）。**先在服务器上把 verify 跑通**再切 `force`。
-  阿里云默认封 25 端口（实测确认），465/587 都通，Outlook 的 587 从这台机器可达。
-* 送达率：Outlook 发往 QQ/163 **很容易进垃圾箱**。如果读者主要是 QQ/163，
-  用 QQ/163 发反而更稳（同域投递几乎不会被判垃圾）。
+* `SENDER_EMAIL` 要与 `SMTP_USER` **相同**（服务商基本都不允许拿别的地址发信）。
+* 送达率：个人邮箱发验证码进垃圾箱是常态 —— 所以验通之后，
+  **自己也真发一封、去垃圾箱里确认一下**，再切 `force`。
 
 ### 8.4 评论是按 URL 绑的
 
