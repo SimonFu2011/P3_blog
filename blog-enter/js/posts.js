@@ -19,8 +19,8 @@ window.POSTS = [
   slug: 'post-20261006',
   title: '无题',
   date: '2026-10-06',
-  category: '现代诗',
-  tags: ['写作'],
+  category: '随笔',
+  tags: ['现代诗'],
   body: '\n<p>她踏着七六拍的步子向大海走去，<br>\n腰间的随身听放着 Nujabes 的《The Final View》。<br>\n<br>\n根本没有这样的场景。<br>\n<br>\n海很宽，很广，总是反刍着蓝光。<br>\n好冷。<br>\n<br>\n小帆几许，漂在一片蓝上，对着朵朵白云。<br>\n云，小小的，说是像棉花糖，不如说是像棉花。<br>\n<br>\n"不对。"<br>\n她在水里吐着泡泡，<br>\n"太重了，那本来该是轻的！好轻好轻……"<br>\n<br>\n她在咳嗽，<br>\n水灌进了咽喉。<br>\n每一下都同工厂里的动力锤沉重，有力。<br>\n<br>\n她在水里打着滚，<br>\n是挣扎，还是玩耍？<br>\n<br>\n"我抓住了！"<br>\n<br>\n你抓到了什么？<br>\n<br>\n她摊开左手——那是她的右手。<br>\n<br>\n她站我前面说："帮我拍张照。"<br>\n我拿着相机。<br>\n<br>\n我说："你头低一点。"<br>\n她昂起了头，<br>\n不想抬头也行，你笑一下。<br>\n她还是摆着扑克脸，<br>\n我不想拍了。<br>\n<br>\n"世界本来就没有定义。"<br>\n<br>\n海风吹着淡淡的浪，<br>\n云飘着无题的诗篇。<br>\n我没说话，只是看着。<br>\n<br>\n少女倒挂在水里，吐着一个又一个的泡泡。<br>\n取景器里的还是那片蓝。<br>\n<br>\n我对焦，<br>\n她清晰了，海模糊了。<br>\n我对海对焦，<br>\n她不在了。<br>\n<br>\n于是我向大海走去。<br>\n腰间的随身听放着 Colour 的《Conversations》。<br>\n没有什么拍号，本来就是乱的。</p>\n\n<figure>\n  <img src="img/uploads/微信图片-2026-10-06-123854-446.jpg" alt="微信图片_2026-10-06_123854_446.jpg" width="720" height="380">\n  <figcaption></figcaption>\n</figure>\n'
 },
 
