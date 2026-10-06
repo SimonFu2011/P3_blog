@@ -291,6 +291,35 @@ const auditIpOf = (ctx) => String(
   || ctx.ip || 'unknown'
 );
 
+/**
+ * "被访问的页面路径"——给访问统计的 path 列用。
+ *
+ * 为什么要从 Referer 取，而不是直接用 ctx.pathname：
+ *   统计请求打的是 POST /api/stats/hit，所以 ctx.pathname 恒等于
+ *   `/api/stats/hit`，记下来毫无信息量。真正想知道的是"哪一页被看了"，
+ *   而浏览器发同源请求时会自动带 `Referer: http://<本站>/about.html`
+ *   （默认 referrerPolicy 是 strict-origin-when-cross-origin，同源带全路径）。
+ *
+ * 三条纪律：
+ *   · **只信同源**：Referer 的主机名必须与本次请求的 Host 一致，否则记空。
+ *     （Host 本身已在 http.mjs 的白名单里校过，所以这里只需比对两者。）
+ *   · **只当参考值**：客户端可以不发、也可以伪造它。所以任何计数、限流、
+ *     授权都不许读这一列 —— 它只为"哪几篇受欢迎"服务。
+ *   · 取不到就记空串，绝不因为 Referer 畸形而让整个统计请求失败。
+ */
+const pagePathOf = (ctx) => {
+  const raw = String((ctx.req && ctx.req.headers && ctx.req.headers.referer) || '');
+  if (!raw) return '';
+  const hostname = (h) => String(h || '').split(':')[0].toLowerCase();
+  try {
+    const u = new URL(raw);
+    if (hostname(u.host) !== hostname(ctx.req.headers.host)) return '';
+    return u.pathname || '';
+  } catch {
+    return '';
+  }
+};
+
 /** 触发熔断时抛出的错误（带 Retry-After，由 http.mjs 统一发出去） */
 const rateLimited = (waitMs) => {
   const sec = Math.max(1, Math.ceil(waitMs / 1000));
@@ -616,6 +645,10 @@ export const buildRoutes = () => [
        （nginx 亲自追加的 $remote_addr），否则用直连对端。明文 IP 只作为
        参数交给数据层，在那里当场 HMAC 成访客标识，不落库、不写日志。
 
+     【path 记的是"被访问的页面"，不是这个接口自己】
+       从同源 Referer 的 pathname 取（见 pagePathOf）；取不到或不同源就记空。
+       它是参考值，不参与任何计数与判权。
+
      【限流】
        每 IP 每分钟 30 次（契约 §0.6）：正常浏览（一分钟点开 30 个页面）够用，
        脚本刷量会被挡住并拿到 429 + Retry-After。它不是安全闸，只是不让
@@ -627,7 +660,7 @@ export const buildRoutes = () => [
       const stats = await ctx.services.statsHit({
         ip: auditIpOf(ctx),
         ua: ctx.ua,
-        path: ctx.pathname
+        path: pagePathOf(ctx)
       });
       return { stats };
     }

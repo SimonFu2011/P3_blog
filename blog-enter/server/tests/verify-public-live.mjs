@@ -1381,8 +1381,13 @@ const runLocalEndpoints = async (deps) => {
           const r2 = await call('/api/stats/hit', { method: 'POST', body: {} });
           must(r2.body.stats.total === 2, '第二次调用后 total=2（PV 语义）', r2.body.stats);
           must(stores.statsRows.length === 2, '数据层必须真的被调用两次', stores.statsRows.length);
-          must(stores.statsRows[0].path === '/api/stats/hit',
-            'path 由服务端自己取（不接受客户端上报"我访问了哪一页"）', stores.statsRows[0]);
+          /* path 记的是"被访问的页面"（从同源 Referer 取），不是接口自己的路径。
+             这一段的客户端是 fetch/makeCaller，它不发 Referer，所以这里只能是空串；
+             同源/跨源 Referer 的取舍由 public-api.test.mjs 用裸 http 验（Referer 在
+             Fetch 规范里是 forbidden header，用 fetch 测不到服务端），
+             真实浏览器那条路径由部署后的 page_views.path 值复核。 */
+          must(stores.statsRows[0].path === '',
+            '不带 Referer 时必须记空串，而不是把 /api/stats/hit 记进去', stores.statsRows[0]);
           must(r1.headers.get('cache-control') === 'no-store', 'Cache-Control: no-store', r1.headers.get('cache-control'));
           return `HTTP 200 total=${r1.body.stats.total}→${r2.body.stats.total} day=${r1.body.stats.day}`;
         });

@@ -236,7 +236,7 @@ CREATE TABLE IF NOT EXISTS `page_views` (
   `visitor` CHAR(32) NOT NULL
     COMMENT '访客标识 = HMAC-SHA256(盐, IP|UA) 的前 32 位十六进制。**不存 IP、也不存 UA**：IPv4 空间可枚举，所以裸哈希等于存了 IP，必须用带随机盐的 HMAC；盐在 page_meta，只存在于本机库',
   `path` VARCHAR(120) NOT NULL DEFAULT ''
-    COMMENT '被访问的路径（不含查询串），截断到 120、剔掉控制字符。统计本身不依赖它，只为日后能看"哪几篇受欢迎"',
+    COMMENT '被访问的页面路径（取自同源 Referer 的 pathname），截断到 120、剔掉控制字符。取不到或不同源时为空串；**它是参考值**，客户端可不发或伪造，所以任何计数与判权都不许读它，只为"哪几篇受欢迎"服务',
   `at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     COMMENT '入库时间（库会话 time_zone=+00:00，即 UTC）。只用于人与运维看，不参与"今日"判定',
   PRIMARY KEY (`id`),

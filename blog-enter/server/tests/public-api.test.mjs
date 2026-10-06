@@ -1404,7 +1404,7 @@ H.test('接口：请求体上限 1MB → 客户端真的收到 413 JSON（S6 回
    ============================================================ */
 
 H.test('接口：POST /api/stats/hit 记一次访问并返回汇总（形状 + 计数）', async () => {
-  await withServer(async ({ call, stores }) => {
+  await withServer(async ({ call, stores, port }) => {
     const r = await call('/api/stats/hit', { method: 'POST', body: '{}' });
     assert.equal(r.status, 200);
     assert.equal(r.body.ok, true);
@@ -1419,9 +1419,26 @@ H.test('接口：POST /api/stats/hit 记一次访问并返回汇总（形状 + �
     const r3 = await call('/api/stats/hit', { method: 'POST', body: '{}' });
     assert.equal(r3.body.stats.total, 3);
     assert.equal(stores.statsRows.length, 3);
-    /* 服务端自己定 path（不接受客户端上报"我访问了哪一页"，
-       否则数字与路径都能被伪造） */
-    assert.equal(stores.statsRows[0].path, '/api/stats/hit');
+    /* path 记的是"被访问的页面"，不是这个接口自己：
+       · 不带 Referer（fetch 默认不发）→ 空串
+       · 同源 Referer → 取它的 pathname（丢掉查询串）
+       · 跨源 Referer → 在**来源判定**那一道就 403，根本到不了路由，因此不留计数
+       这些用 rawSend（裸 http）而不是 fetch：Referer 在 Fetch 规范里属于
+       forbidden header name，浏览器/undici 都可能把它丢掉，那样测的就不是服务端了。 */
+    assert.equal(stores.statsRows[0].path, '', '没有 Referer 时记空串');
+    await rawSend(port, 'POST', '/api/stats/hit', {
+      host: '127.0.0.1:' + port, 'content-type': 'application/json',
+      referer: 'http://127.0.0.1/about.html?x=1'
+    }, '{}');
+    assert.equal(stores.statsRows[3].path, '/about.html', '同源 Referer 取其 pathname');
+    const xsite = await rawSend(port, 'POST', '/api/stats/hit', {
+      host: '127.0.0.1:' + port, 'content-type': 'application/json',
+      referer: 'http://evil.example/about.html'
+    }, '{}');
+    assert.equal(xsite.status, 403, '跨源 Referer 必须 403（来源判定，不是记空串）');
+    assert.equal(stores.statsRows.length, 4, '被拒的请求不许留下计数');
+    assert.notEqual(stores.statsRows[0].path, '/api/stats/hit',
+      '以前记的是接口自己的路径，那是没有信息量的值');
     /* 响应必须是 no-store：统计数字被中间层缓存就会变成"永远不变" */
     assert.match(String(r.headers.get('cache-control')), /no-store/);
   });
@@ -1480,6 +1497,20 @@ H.test('接口：/api/stats/hit 每 IP 每分钟 30 次，第 31 次是 429 + Re
     const g = await call('/api/stats');
     assert.equal(g.status, 200);
   });
+});
+
+H.test('接口：访问统计的 path 只认同源 Referer（多源白名单下的纵深防御）', async () => {
+  /* 一个真实场景：站点既能用 IP 访问、也能用域名访问，于是 --public-origin 会有两项。
+     此时"来源判定"会放行来自另一个白名单源的 Referer，但那次请求的页面并不属于
+     本次请求的 Host —— pagePathOf 必须把它记成空，而不是把别的源的路径写进来。 */
+  await withServer(async ({ stores, port }) => {
+    await rawSend(port, 'POST', '/api/stats/hit', {
+      host: '127.0.0.1:' + port, 'content-type': 'application/json',
+      referer: 'http://other.example/about.html'
+    }, '{}');
+    assert.equal(stores.statsRows.length, 1, '这一条请求本身是放行的（other.example 在白名单里）');
+    assert.equal(stores.statsRows[0].path, '', '但路径必须记空：它不代表本次请求的页面');
+  }, { origins: ['http://127.0.0.1', 'http://other.example'] });
 });
 
 H.test('接口：骨架模式（--allow-degraded）下访问统计回 503，而不是假数字', async () => {
