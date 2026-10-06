@@ -164,6 +164,11 @@ export const createApp = async (options) => {
   };
 
   /* ---------- 安全闸上下文 ---------- */
+  /* 回环名**永远**在 Host 白名单里，不能因为远端模式就把它挤掉。
+     理由：本服务只绑 127.0.0.1，而"对端必须是回环"这道闸已经说明
+     请求来自本机。"只绑回环 + 对端是回环"本来就是这道判据的替代品，
+     把它删掉会连 SSH 隧道一起挡在门外 —— 而隧道正是纯 HTTP 阶段
+     唯一零攻击面的入口（实测踩过：隧道访问管理页 403）。 */
   const allowedHosts = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost']);
   cfg.publicHosts.forEach((h) => { const n = String(h || '').trim().toLowerCase(); if (n) allowedHosts.add(n); });
   const allowedOrigins = cfg.publicOrigins.length ? new Set(cfg.publicOrigins) : null;
