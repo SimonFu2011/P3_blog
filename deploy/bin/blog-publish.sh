@@ -176,13 +176,29 @@ rsync -rlt --omit-dir-times --delete \
 mkdir -p "$WEB_ROOT/img/uploads"
 
 # ------------------------------------------------------------
-# 发布后自检：不该出现在站点根目录的东西，一个都不许有
+# 归一化权限：**这一步不是可选的**
 # ------------------------------------------------------------
-# 为什么要有这一步：rsync 的排除清单是**黑名单**，它保证"这些不被上传"，
-# 但保证不了"站点根目录里没有它们的旧副本"，也挡不住有人手工拷进去、
-# 或者改了名字的版本（admin-old/、server.bak/）。
-# 这个项目就发生过管理页与 dev-server.mjs 被公网直接下载的事故。
-# 所以发布完**主动验一遍**，不通过就大声报错（exit 5），别等下次才发现。
+# 为什么必须做：管理页进程（systemd 的 UMask）新建的文件默认 600、目录 700。
+#   · 目录 2700 → nginx 以 www 身份**连遍历都做不到**（403）
+#   · 文件 0600 → www 读不到（403）
+# blog 在 www 组里，所以只要把"组"的位打开就够了：目录 2775、文件 664。
+# 站点根目录本来就是 www:www + 2775 setgid（引导脚本设的），这里只是把
+# 新产生的文件对齐到同一套权限，与既有文件一致。
+#
+# 不这么做的话，症状是"文章发出去了、图片却是 403"，而且很隐蔽 ——
+# 发布脚本当时还报"自检通过"（因为自检只检查了不该有什么）。
+chmod 2775 "$WEB_ROOT" 2>/dev/null || true
+find "$WEB_ROOT" -type d -exec chmod 2775 {} + 2>/dev/null || true
+find "$WEB_ROOT" -type f -exec chmod 664 {} + 2>/dev/null || true
+# .user.ini 是面板生成且被 chattr +i 锁定的，别去动它
+chmod 644 "$WEB_ROOT/.user.ini" 2>/dev/null || true
+
+# ------------------------------------------------------------
+# 发布后自检
+# ------------------------------------------------------------
+# 检查两件事，缺一不可：
+#   A) 不该有的：admin/ server/ tests/ api/ .env 等源码与隐藏文件
+#   B) 该有的**能读**：nginx 以 www 身份运行，凡是它读不了的就是线上 404/403
 leaked=0
 for bad in admin _admin server tests api .env .git .admin; do
   if [ -e "$WEB_ROOT/$bad" ]; then
@@ -191,16 +207,39 @@ for bad in admin _admin server tests api .env .git .admin; do
   fi
 done
 # 顶层散落的 .mjs / .cjs 源码也不该存在
-if find "$WEB_ROOT" -maxdepth 1 -name '*.mjs' -o -maxdepth 1 -name '*.cjs' 2>/dev/null | grep -q .; then
+if find "$WEB_ROOT" -maxdepth 1 \( -name '*.mjs' -o -name '*.cjs' \) 2>/dev/null | grep -q .; then
   echo "  泄漏！站点根目录里有 .mjs / .cjs 源码" >&2
   leaked=1
 fi
+
 if [ "$leaked" = "1" ]; then
   echo "" >&2
   echo "发布已中断，但内容可能已经同步过去。请立刻人工清理 $WEB_ROOT 并核对 nginx 规则。" >&2
   exit 5
 fi
 
+# B) 该有的能读吗 —— 用 nginx 的身份真读一次
+unreadable=0
+if sudo -u www test -r "$WEB_ROOT/js/posts.js" 2>/dev/null; then
+  :
+else
+  # 无法切换身份时（比如没装 sudo 规则）退化为按权限位判断
+  if [ ! -r "$WEB_ROOT/js/posts.js" ]; then unreadable=1; fi
+fi
+# 逐个检查新增的图片：它们是最容易被 600 权限坑到的一类
+for f in "$WEB_ROOT"/img/uploads/*; do
+  [ -e "$f" ] || continue
+  if ! sudo -u www test -r "$f" 2>/dev/null && [ ! -r "$f" ]; then
+    echo "  图片不可读（nginx 会 403）：$(basename "$f")" >&2
+    unreadable=1
+  fi
+done
+if [ "$unreadable" = "1" ]; then
+  echo "" >&2
+  echo "发布内容存在，但 nginx 读不到 —— 请检查权限（目录应为 2775、文件 664）。" >&2
+  exit 5
+fi
+
 echo "published $(git -C "$REPO_DIR" rev-parse --short HEAD) ($(git -C "$REPO_DIR" log -1 --pretty=%s))"
 echo "  -> $WEB_ROOT  at $(date -Is)"
-echo "  自检通过：站点根目录无 admin/ server/ tests/ api/ .env 等非公开产物"
+echo "  自检通过：无非公开产物；权限已归一（目录 2775 / 文件 664），nginx 可读"

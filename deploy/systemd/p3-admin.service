@@ -13,8 +13,13 @@ WorkingDirectory=/srv/blog/repo
 # /usr/local/bin。用 /usr/bin/env node 或裸 node 都会以 "command not found" 失败。
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 Environment=NODE_ENV=production
-# 运行时数据（.admin/）的权限；同机其它用户读不到口令哈希与会话
-UMask=0077
+# 运行时数据（.admin/）与会话/口令文件要严：属主之外都别读。
+#   0027 = 新建文件 640、目录 750 —— 组（blog）可读写，其它人无权限。
+#   注意**不要设成 0077**：那样新建的文件是 600、目录是 700，
+#   而发布到站点根目录的图片会以这个 umask 创建 → nginx（www 组）
+#   既不能遍历 700 的目录、也读不到 600 的文件 → 线上 403。
+#   站点产物的权限由 blog-publish.sh 在发布时统一归一到 2775/664。
+UMask=0027
 
 # 注意：这里**不用** --pass 传口令（会进 ps 与 journald）。口令已用
 #   printf %s "..." | node dev-server.mjs --set-pass --pass-stdin
