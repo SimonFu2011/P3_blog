@@ -18,6 +18,11 @@ WEB_ROOT="${WEB_ROOT:-/var/www/blog}"
 BRANCH="${BRANCH:-main}"
 SITE_DIR="$REPO_DIR/blog-enter"
 
+# "内容"文件的白名单：只有这些会被自动提交。
+# 代码（dev-server.mjs / blog-publish.sh 等）不在此列 —— 那些改动应该由人
+# review 后提交，不该被一个由 HTTP 请求触发的自动流程吞掉。
+CONTENT_PATHS="blog-enter/js/posts.js blog-enter/img/uploads"
+
 [ -d "$REPO_DIR/.git" ]  || { echo "找不到 git 仓库：$REPO_DIR" >&2; exit 1; }
 [ -d "$SITE_DIR" ]       || { echo "找不到站点目录：$SITE_DIR" >&2; exit 1; }
 command -v rsync >/dev/null || { echo "缺少 rsync" >&2; exit 1; }
@@ -54,6 +59,29 @@ fi
 cd "$REPO_DIR"
 
 # ------------------------------------------------------------
+# 【内容先落提交】让"保存即上线"真的能跑通
+# ------------------------------------------------------------
+# 背景：管理页保存时**只写文件，不提交**（服务器的 git 身份/凭据不该被一个
+# HTTP 进程持有）。而下面那道"工作区脏就拒绝发布"的闸门是必须的 —— 它能防住
+# `git reset`/`checkout` 把服务器上的改动无声丢掉。
+# 两者撞在一起的结果是：每次保存后自动发布都会以"工作区脏"失败。
+#
+# 所以中间这一步必须有：**把"内容"文件自动提交**，让工作区变干净。
+# 只提交内容（posts.js 与上传的图片）—— 代码文件（dev-server.mjs 等）保持
+# "脏就报错"，那些应该由人 review 后再提交，不该被一个自动流程吞掉。
+if [ "${AUTO_COMMIT_CONTENT:-1}" = "1" ]; then
+  content_changed="$(git status --porcelain -- "$CONTENT_PATHS" 2>/dev/null || true)"
+  if [ -n "$content_changed" ]; then
+    echo "  检测到内容改动，自动提交（只提交内容文件）："
+    echo "$content_changed" | sed 's/^/    /'
+    git add -- "$CONTENT_PATHS"
+    git -c user.name="blog-publish" -c user.email="blog-publish@localhost" \
+        commit -q -m "content: 管理页保存于 $(date -Is)" || echo "  （提交失败，继续尝试发布）"
+    echo "  -> $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
+  fi
+fi
+
+# ------------------------------------------------------------
 # 【防丢数据】服务器上不留"未提交的改动"被静默回退
 # ------------------------------------------------------------
 # 原来这里是 git reset --hard origin/$BRANCH —— 如果有人在服务器上（比如通过
@@ -61,12 +89,13 @@ cd "$REPO_DIR"
 #   · 工作区脏 → 明确报错，让人决定（提交 / 丢弃 / 手工处理）
 #   · 干净 → 只做快进合并，绝不 reset
 if [ -n "$(git status --porcelain)" ]; then
-  echo "拒绝发布：$REPO_DIR 的工作区有未提交的改动。" >&2
+  echo "拒绝发布：$REPO_DIR 的工作区有未提交的改动（且不在内容文件白名单里）。" >&2
   git status --short >&2
   echo "" >&2
-  echo "  这些改动会被 git reset --hard 丢掉，所以先决定怎么处理：" >&2
+  echo "  这些改动会被 git reset 丢掉，所以先决定怎么处理：" >&2
   echo "    · 想保留   → git add -A && git commit -m \"...\"  然后重跑" >&2
   echo "    · 想丢弃   → git checkout -- .                   然后重跑" >&2
+  echo "    · 是内容   → 把它们加进本脚本的 CONTENT_PATHS 白名单" >&2
   exit 3
 fi
 
