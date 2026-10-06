@@ -11,10 +11,26 @@
    根本没有管理页、也没有任何写代码。不是"藏起来"，是"不存在"。
 
    用法：
-     node blog-enter/server/dev-server.mjs                 # http://127.0.0.1:8848/
+     node blog-enter/server/dev-server.mjs                 # 本地模式（只绑回环）
      node blog-enter/server/dev-server.mjs --port 9000
-     node blog-enter/server/dev-server.mjs --set-pass --pass "口令"
+
+   口令（**没有 --pass**：走命令行会进 ps 与 journald，所以只从 stdin 读）：
+     # 交互式（不回显，要输两次确认）
+     node blog-enter/server/dev-server.mjs --set-pass
+     # 管道 / 脚本
+     printf %s "你的新口令" | node blog-enter/server/dev-server.mjs --set-pass --pass-stdin
+     # 只验证不改（不会触发登录退避，忘了口令时先这样确认）
+     node blog-enter/server/dev-server.mjs --verify-pass
+     # 清除口令（回到"仅本机 + 会话令牌"）
      node blog-enter/server/dev-server.mjs --clear-pass
+
+   远端模式（暴露到公网时才用）：
+     --remote                 所有 /api/* 需解锁（含 GET）+ 每客户端会话 cookie
+     --public-host  <名字>    可重复；Host 白名单（公网名与回环名）
+     --public-origin <源>     可重复；Origin 白名单，精确匹配（含隧道入口）
+     --trust-proxy            从 X-Forwarded-For 取真实客户端 IP
+     --proxy-secret-file <f>  反代注入的共享密钥（远端模式必填）
+     --auto-publish           保存后自动跑发布（改完即上线）
 
    安全设计（逐条都能在 security.mjs / auth.mjs 里查到实现）：
      1. 只绑 127.0.0.1，没有"顺手绑 0.0.0.0"的开关
@@ -830,7 +846,9 @@ const main = async () => {
     return out;
   };
 
-  /* ---- 口令设置：不要用 --pass（会进 ps 与 journald）---- */
+  /* ---- 口令：从标准输入读，绝不走命令行 ----
+     走 argv 的口令会进 `ps`（同机任何人都看得见）与 journald（systemd-run 或
+     unit 调用时）。所以只支持 stdin。 */
   const readPassFromStdin = () => new Promise((resolve) => {
     let buf = '';
     process.stdin.setEncoding('utf8');
@@ -838,33 +856,74 @@ const main = async () => {
     process.stdin.on('end', () => resolve(buf.replace(/[\r\n]+$/, '')));
   });
 
-  if (flag('set-pass')) {
-    let pass = '';
-    if (flag('pass-stdin') || !process.stdin.isTTY) {
-      pass = await readPassFromStdin();
-    } else {
-      process.stdout.write('请输入管理口令（输入不回显，回车确认）：');
-      pass = await readPassFromStdin();
+  /* 交互式输入：**必须关掉回显**。
+     原来这里只写了"输入不回显"这句提示，但没有任何代码去关它 ——
+     口令会明明白白留在终端与滚动缓冲里。属于"注释在说谎"。 */
+  const promptPassphrase = (label) => new Promise((resolve) => {
+    const stdin = process.stdin;
+    process.stdout.write(label);
+    let buf = '';
+    const cleanup = () => {
+      try { stdin.setRawMode(false); } catch { /* 不是 TTY */ }
+      stdin.pause();
+      stdin.removeListener('data', onData);
       process.stdout.write('\n');
-    }
-    if (!pass) {
-      console.error('没有读到口令。用法：');
-      console.error('  printf %s "你的口令" | node blog-enter/server/dev-server.mjs --set-pass --pass-stdin');
+    };
+    const onData = (chunk) => {
+      for (const ch of String(chunk)) {
+        if (ch === '\r' || ch === '\n') { cleanup(); resolve(buf); return; }
+        if (ch === '\u0003') { cleanup(); process.stdout.write('已取消\n'); process.exit(1); }
+        if (ch === '\u007f' || ch === '\b') { buf = buf.slice(0, -1); continue; }
+        buf += ch;
+      }
+    };
+    try { stdin.setRawMode(true); } catch { /* 兜底：非 TTY 时仍然收字节 */ }
+    stdin.resume();
+    stdin.on('data', onData);
+  });
+
+  const readPassphrase = async () => {
+    /* 显式 --pass-stdin，或 stdin 被重定向（管道）→ 直接读，不回显也不需要 */
+    if (flag('pass-stdin') || !process.stdin.isTTY) return readPassFromStdin();
+    const first = await promptPassphrase('请输入新口令（不回显，回车确认）：');
+    if (!first) return '';
+    const again = await promptPassphrase('请再输一次（确认）：');
+    if (first !== again) {
+      console.error('两次输入不一致，未做任何修改。');
       process.exit(2);
     }
-    /* 顺手提醒一下弱口令：远端模式下这是唯一的门 */
+    return first;
+  };
+
+  const runtimeDirOnly = () => resolveConfig({
+    port: value('port', process.env.PORT || 8848),
+    runtimeDir: value('runtime', undefined),
+    blogDir: value('root', undefined)
+  }).runtimeDir;
+
+  if (flag('set-pass')) {
+    const pass = await readPassphrase();
+    if (!pass) {
+      console.error('没有读到口令。用法：');
+      console.error('  printf %s "你的新口令" | node blog-enter/server/dev-server.mjs --set-pass --pass-stdin');
+      process.exit(2);
+    }
     if (pass.length < 16) console.warn('提示：口令偏短，公网场景建议 24 位以上随机串。');
-    await auth.setPassphrase(cfgRuntimeDirOnly(), pass);
-    console.log('口令已设置（PBKDF2-SHA256 哈希存在 .admin/passphrase.json，不存明文）');
+    await auth.setPassphrase(runtimeDirOnly(), pass);
+    /* 立刻自查一遍：宁可现在报错，也别等你在浏览器里反复试 */
+    const check = await auth.checkPassphrase(runtimeDirOnly(), pass);
+    console.log('口令已设置（PBKDF2-SHA256 哈希存在 .admin/passphrase.json，不存明文）。');
+    console.log('  自查：' + (check.ok ? '用这个口令验证通过 ✓' : '⚠ 验证不通过，请重设'));
     return;
   }
 
-  function cfgRuntimeDirOnly() {
-    return resolveConfig({
-      port: value('port', process.env.PORT || 8848),
-      runtimeDir: value('runtime', undefined),
-      blogDir: value('root', undefined)
-    }).runtimeDir;
+  /* 只验证不改：用来确认"我记的这个口令到底对不对"，不会触发登录退避 */
+  if (flag('verify-pass')) {
+    const pass = await readPassphrase();
+    if (!pass) { console.error('没有读到口令'); process.exit(2); }
+    const r = await auth.checkPassphrase(runtimeDirOnly(), pass);
+    console.log(r.ok ? '口令正确 ✓' : '口令不正确 ✗');
+    process.exit(r.ok ? 0 : 1);
   }
 
   /* ---- 反代密钥文件 ---- */
