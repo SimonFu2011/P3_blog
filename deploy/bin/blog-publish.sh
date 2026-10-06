@@ -21,7 +21,13 @@ SITE_DIR="$REPO_DIR/blog-enter"
 # "内容"文件的白名单：只有这些会被自动提交。
 # 代码（dev-server.mjs / blog-publish.sh 等）不在此列 —— 那些改动应该由人
 # review 后提交，不该被一个由 HTTP 请求触发的自动流程吞掉。
-CONTENT_PATHS="blog-enter/js/posts.js blog-enter/img/uploads"
+#
+# 必须是**数组**：git 的 pathspec 参数是分开传的。写成
+#   CONTENT_PATHS="a b"
+#   git status --porcelain -- "$CONTENT_PATHS"
+# 会把 "a b" 当成**一个**路径（含空格），永远匹配不到任何文件 ——
+# 于是自动提交被静默跳过，发布又因为"工作区脏"被拒。这个坑踩过一次。
+CONTENT_PATHS=(blog-enter/js/posts.js blog-enter/img/uploads)
 
 [ -d "$REPO_DIR/.git" ]  || { echo "找不到 git 仓库：$REPO_DIR" >&2; exit 1; }
 [ -d "$SITE_DIR" ]       || { echo "找不到站点目录：$SITE_DIR" >&2; exit 1; }
@@ -70,11 +76,11 @@ cd "$REPO_DIR"
 # 只提交内容（posts.js 与上传的图片）—— 代码文件（dev-server.mjs 等）保持
 # "脏就报错"，那些应该由人 review 后再提交，不该被一个自动流程吞掉。
 if [ "${AUTO_COMMIT_CONTENT:-1}" = "1" ]; then
-  content_changed="$(git status --porcelain -- "$CONTENT_PATHS" 2>/dev/null || true)"
+  content_changed="$(git status --porcelain -- "${CONTENT_PATHS[@]}" 2>/dev/null || true)"
   if [ -n "$content_changed" ]; then
     echo "  检测到内容改动，自动提交（只提交内容文件）："
     echo "$content_changed" | sed 's/^/    /'
-    git add -- "$CONTENT_PATHS"
+    git add -- "${CONTENT_PATHS[@]}"
     git -c user.name="blog-publish" -c user.email="blog-publish@localhost" \
         commit -q -m "content: 管理页保存于 $(date -Is)" || echo "  （提交失败，继续尝试发布）"
     echo "  -> $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
