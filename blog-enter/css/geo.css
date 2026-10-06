@@ -198,7 +198,14 @@ body::after {
 .nav-link:hover .nl-en { text-shadow: -.026em -.024em 0 var(--g-red), .03em .03em 0 rgba(56, 189, 248, .8); }
 .nav-link:hover .nl-cn { color: var(--g-ink); }
 
-.nav-link[aria-current="page"] { transform: translateX(-.05em); }
+/* 选中项：必须显式写 color。
+   pages.css 里 .nav-link[aria-current="page"]{color:var(--white)} 是同权重的
+   "深水底"版本，靠后加载取胜 —— 它给的是白字，在纯白侧栏上等于空白，
+   只剩 text-shadow 那两层红/青偏移在勉强看出字形（实测 computed color 就是
+   rgb(255,255,255)）。这里补上墨色，叠印效果不变，字本身回到能读的对比度。
+   顺带修掉一个连带缺陷：外壳的图标栏用 currentColor 画图标，
+   以前这一枚会因为"白字"而在白色侧栏上整个消失。 */
+.nav-link[aria-current="page"] { transform: translateX(-.05em); color: var(--g-ink); }
 .nav-link[aria-current="page"] .nl-en {
   text-shadow: -.026em -.024em 0 var(--g-red), .03em .03em 0 rgba(56, 189, 248, .95);
 }

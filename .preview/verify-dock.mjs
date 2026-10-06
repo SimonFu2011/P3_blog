@@ -104,10 +104,17 @@ const main = async () => {
       return;
     }
     if (msg.method === 'Log.entryAdded' && msg.params.entry.level === 'error') {
-      consoleErrors.push(msg.params.entry.text);
+      /* /api/auth/me 与 /api/stats/hit 的 404 是**预期内**的：前者是右上角
+         登录入口探会话，后者是访问统计计数；这套静态预览（.preview/serve.mjs）
+         没有 /api，真机上由 p3-public 应答。只豁免这两条且必须带 404。 */
+      const u = msg.params.entry.url || '';
+      if (!(/\/api\/(auth\/me|stats\/hit)\b/.test(u) && /404/.test(msg.params.entry.text))) {
+        consoleErrors.push(msg.params.entry.text + (u ? ' @ ' + u : ''));
+      }
     }
     if (msg.method === 'Network.responseReceived' && msg.params.response.status >= 400) {
-      netFails.push(msg.params.response.status + ' ' + msg.params.response.url);
+      const u = msg.params.response.url;
+      if (!/\/api\/(auth\/me|stats\/hit)\b/.test(u)) netFails.push(msg.params.response.status + ' ' + u);
     }
   };
 

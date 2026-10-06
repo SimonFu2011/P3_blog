@@ -37,6 +37,7 @@ import * as httpLib from '../lib/public/http.mjs';
 import * as dbMod from '../lib/public/db.mjs';
 import * as userstore from '../lib/public/userstore.mjs';
 import * as commentstore from '../lib/public/commentstore.mjs';
+import * as statsstore from '../lib/public/statsstore.mjs';
 
 const H = createHarness('公开服务 (t14)');
 
@@ -576,6 +577,114 @@ H.test('userstore：清理过期会话是参数化的批量 DELETE', async () =>
 });
 
 /* ============================================================
+   六之二、访问统计（statsstore.mjs，假 db 句柄）
+   ------------------------------------------------------------
+   这一组盯三件事，每一件都是"错了以后只有盯着数字看才发现"的类型：
+     1) 库里不许出现明文 IP（访客标识必须是带盐 HMAC 的截断值）
+     2) "今日"必须按站点时区（+08:00）算，不能跟着库/容器时区漂
+     3) 三个数字必须来自同一条 SQL，且 SUM 的 NULL / DECIMAL 字符串要归一成数字
+   ============================================================ */
+
+H.test('statsstore：siteDay 按站点时区（+08:00）切天，不跟 UTC 走', () => {
+  /* UTC 的 2026-10-05 16:30 已经是北京的 2026-10-06 00:30 —— 这个跨天时刻
+     正是"今日访问量"最容易错的地方（差一天，而且只有半夜看才发现）。 */
+  const t = new Date('2026-10-05T16:30:00Z');
+  assert.equal(statsstore.siteDay(t), '2026-10-06');
+  assert.equal(statsstore.siteDay(t, 0), '2026-10-05', '偏移 0（UTC）时仍是 10-05');
+  /* 边界：北京 23:59 与次日 00:00 分属两天 */
+  assert.equal(statsstore.siteDay(new Date('2026-10-05T15:59:59Z')), '2026-10-05');
+  assert.equal(statsstore.siteDay(new Date('2026-10-05T16:00:00Z')), '2026-10-06');
+  assert.equal(statsstore.SITE_TZ_OFFSET_MIN, 480, '站点时区常量必须是 +08:00');
+});
+
+H.test('statsstore：访客标识是 HMAC 截断，同一个 IP 不会以明文进任何参数', async () => {
+  const salt = 'a'.repeat(64);
+  const a = statsstore.visitorOf(salt, '203.0.113.7', 'UA-1');
+  const b = statsstore.visitorOf(salt, '203.0.113.7', 'UA-1');
+  const c = statsstore.visitorOf(salt, '203.0.113.8', 'UA-1');
+  const d = statsstore.visitorOf('b'.repeat(64), '203.0.113.7', 'UA-1');
+  assert.equal(a, b, '同盐同输入必须稳定（否则每次都算新访客，UV 会等于 PV）');
+  assert.notEqual(a, c, '不同 IP 必须不同');
+  assert.notEqual(a, d, '换盐必须不同（否则跨部署可对照）');
+  assert.match(a, /^[0-9a-f]{32}$/);
+  assert.ok(!a.includes('203.0.113.7'), '标识里不能残留 IP');
+
+  /* 真实写库路径：参数里只允许出现 日期 / 标识 / 路径 三个值 */
+  const db = fakeDb((sql) => {
+    if (/SELECT v FROM page_meta/.test(sql)) return [[{ v: salt }], null];
+    if (/INSERT INTO page_views/.test(sql)) return [{ affectedRows: 1 }, null];
+    return [[{ total: '1', today: '1', visitors: '1' }], null];
+  });
+  statsstore.resetSaltCache();
+  await statsstore.recordHit(db, { ip: '203.0.113.7', ua: 'UA-1', path: '/about.html', now: new Date('2026-10-05T16:30:00Z') });
+  const ins = db.calls.find((c) => /INSERT INTO page_views/.test(c.sql));
+  assert.ok(ins, '必须真的写了一条访问记录');
+  assert.match(ins.sql, /INSERT INTO page_views \(day, visitor, path\) VALUES \(\?, \?, \?\)/);
+  assert.ok(hasPlaceholder(ins.sql, ins.params));
+  assert.equal(ins.params[0], '2026-10-06', 'day 必须是站点时区的日期');
+  assert.equal(ins.params[1], statsstore.visitorOf(salt, '203.0.113.7', 'UA-1'));
+  assert.equal(ins.params[2], '/about.html');
+  assert.equal(JSON.stringify(ins.params).includes('203.0.113.7'), false,
+    '写库参数里不允许出现明文 IP：' + JSON.stringify(ins.params));
+});
+
+H.test('statsstore：cleanPath 剔控制字符并截断到 120', () => {
+  assert.equal(statsstore.cleanPath('/a\u0000b\u001fc'), '/abc');
+  assert.equal(statsstore.cleanPath(null), '');
+  assert.equal(statsstore.cleanPath('/x'.repeat(200)).length, 120);
+});
+
+H.test('statsstore：盐惰性生成一次并进入进程缓存，不每次请求都读库', async () => {
+  statsstore.resetSaltCache();
+  const db = fakeDb((sql, params, i) => {
+    /* 第一次查询：没有盐 → 走 INSERT → 再读回 */
+    if (/SELECT v FROM page_meta/.test(sql)) {
+      return i < 2 ? [[], null] : [[{ v: params[1] }], null];
+    }
+    return [{ affectedRows: 1 }, null];
+  });
+  const s1 = await statsstore.getOrCreateSalt(db);
+  assert.match(s1, /^[0-9a-f]{64}$/, '必须是 32 字节随机盐的十六进制');
+  const readsAfterFirst = db.calls.filter((c) => /SELECT v FROM page_meta/.test(c.sql)).length;
+  assert.equal(readsAfterFirst, 2, '首次要"读一次 → 写 → 再读回"');
+  const s2 = await statsstore.getOrCreateSalt(db);
+  assert.equal(s2, s1);
+  assert.equal(db.calls.filter((c) => /SELECT v FROM page_meta/.test(c.sql)).length, readsAfterFirst,
+    '第二次必须直接吃缓存，不再读库');
+
+  /* 并发首次写入不能覆盖已存在的盐：SQL 必须是 ON DUPLICATE KEY UPDATE v = v
+     （写成 v = VALUES(v) 会让后到的进程覆盖先到的，已入库的 visitor 立刻对不上） */
+  statsstore.resetSaltCache();
+  const db2 = fakeDb((sql) => {
+    if (/SELECT v FROM page_meta/.test(sql)) return [[], null];
+    return [{ affectedRows: 1 }, null];
+  });
+  await statsstore.getOrCreateSalt(db2);
+  const ins = db2.calls.find((c) => /INSERT INTO page_meta/.test(c.sql));
+  assert.match(ins.sql, /ON DUPLICATE KEY UPDATE v = v\b/);
+  assert.ok(!/VALUES\(v\)/i.test(ins.sql));
+  statsstore.resetSaltCache();
+});
+
+H.test('statsstore：summary 一条 SQL 算三个数，并归一化 DECIMAL 字符串与 NULL', async () => {
+  const db = fakeDb(() => [[{ total: '1234', today: '56', visitors: '789' }], null]);
+  const s = await statsstore.summary(db, { now: new Date('2026-10-05T16:30:00Z') });
+  assert.deepEqual(s, { total: 1234, today: 56, visitors: 789, day: '2026-10-06' });
+  assert.equal(db.calls.length, 1, '三个数字必须来自同一条 SQL（否则会落在不同时间点上）');
+  assert.match(db.calls[0].sql, /COUNT\(\*\) AS total/);
+  assert.match(db.calls[0].sql, /COUNT\(DISTINCT visitor\) AS visitors/);
+  assert.match(db.calls[0].sql, /SUM\(day = \?\) AS today/);
+  assert.deepEqual(db.calls[0].params, ['2026-10-06']);
+
+  /* 空表：SUM 返回 NULL，必须兜成 0（否则前端会显示 "null"） */
+  const empty = fakeDb(() => [[{ total: 0, today: null, visitors: null }], null]);
+  const e = await statsstore.summary(empty);
+  assert.equal(e.total, 0);
+  assert.equal(e.today, 0);
+  assert.equal(e.visitors, 0);
+});
+
+/* ============================================================
    七、数据库配置（db.mjs）
    ============================================================ */
 
@@ -800,6 +909,17 @@ const memoryStores = () => {
        `ctx.services.authLog(...)` 调用时炸成 TypeError。 */
     async authLog(entry) { authLog.push(entry); return true; },
     authLogRows: authLog,
+    /* 访问统计：形状与真实现一致（真实现是 HMAC + 一条 SQL，已在六之二单测）。
+       这里只记"谁在什么路径打了一次"，供 HTTP 层断言用。 */
+    statsRows: [],
+    async statsHit({ ip, ua, path }) {
+      stores.statsRows.push({ ip, ua, path, day: '2026-10-06' });
+      return { total: stores.statsRows.length, today: stores.statsRows.length, visitors: 1, day: '2026-10-06' };
+    },
+    async statsSummary() {
+      const n = stores.statsRows.length;
+      return { total: n, today: n, visitors: n ? 1 : 0, day: '2026-10-06' };
+    },
     async close() {}
   };
 
@@ -1280,6 +1400,108 @@ H.test('接口：请求体上限 1MB → 客户端真的收到 413 JSON（S6 回
 });
 
 /* ============================================================
+   八之二、访问统计接口（契约 §1.8 / §1.9）
+   ============================================================ */
+
+H.test('接口：POST /api/stats/hit 记一次访问并返回汇总（形状 + 计数）', async () => {
+  await withServer(async ({ call, stores }) => {
+    const r = await call('/api/stats/hit', { method: 'POST', body: '{}' });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.ok, true);
+    /* 形状：三个数字 + day，全部来自服务端 */
+    assert.deepEqual(Object.keys(r.body.stats).sort(), ['day', 'today', 'total', 'visitors']);
+    assert.equal(r.body.stats.total, 1);
+    assert.equal(r.body.stats.today, 1);
+    assert.equal(r.body.stats.visitors, 1);
+    assert.match(r.body.stats.day, /^\d{4}-\d{2}-\d{2}$/);
+    /* 每次调用都是一次 PV */
+    await call('/api/stats/hit', { method: 'POST', body: '{}' });
+    const r3 = await call('/api/stats/hit', { method: 'POST', body: '{}' });
+    assert.equal(r3.body.stats.total, 3);
+    assert.equal(stores.statsRows.length, 3);
+    /* 服务端自己定 path（不接受客户端上报"我访问了哪一页"，
+       否则数字与路径都能被伪造） */
+    assert.equal(stores.statsRows[0].path, '/api/stats/hit');
+    /* 响应必须是 no-store：统计数字被中间层缓存就会变成"永远不变" */
+    assert.match(String(r.headers.get('cache-control')), /no-store/);
+  });
+});
+
+H.test('接口：POST /api/stats/hit 必须 application/json（415），空体也算合法', async () => {
+  await withServer(async ({ call }) => {
+    /* 写接口不带 content-type → 415（契约 §0.3）。这一条同时挡住了
+       "不需要预检就能发出去"的跨站表单。 */
+    const bare = await call('/api/stats/hit', { method: 'POST' });
+    assert.equal(bare.status, 415);
+    assert.equal(bare.body.error.code, 'UNSUPPORTED_MEDIA_TYPE');
+    const wrong = await call('/api/stats/hit', {
+      method: 'POST', body: 'x=1', headers: { 'content-type': 'application/x-www-form-urlencoded' }
+    });
+    assert.equal(wrong.status, 415);
+    /* 正确的 content-type + 空对象是最小合法请求 */
+    const okEmpty = await call('/api/stats/hit', { method: 'POST', body: '{}' });
+    assert.equal(okEmpty.status, 200);
+  });
+});
+
+H.test('接口：GET /api/stats 只读不计数，POST 到它则是 405 + Allow', async () => {
+  await withServer(async ({ call, stores }) => {
+    await call('/api/stats/hit', { method: 'POST', body: '{}' });
+    const before = stores.statsRows.length;
+    const g1 = await call('/api/stats');
+    assert.equal(g1.status, 200);
+    assert.equal(g1.body.stats.total, before);
+    await call('/api/stats');
+    assert.equal(stores.statsRows.length, before, 'GET /api/stats 不允许写库');
+
+    /* 路径存在但方法不对 → 405，并且必须带 Allow（调用者据此知道该用哪个动词） */
+    const wrong = await call('/api/stats', { method: 'POST', body: '{}' });
+    assert.equal(wrong.status, 405);
+    assert.equal(wrong.body.error.code, 'METHOD_NOT_ALLOWED');
+    assert.match(String(wrong.headers.get('allow')), /GET/);
+    const wrong2 = await call('/api/stats/hit');
+    assert.equal(wrong2.status, 405);
+    assert.match(String(wrong2.headers.get('allow')), /POST/);
+  });
+});
+
+H.test('接口：/api/stats/hit 每 IP 每分钟 30 次，第 31 次是 429 + Retry-After', async () => {
+  await withServer(async ({ call }) => {
+    let last = null;
+    for (let i = 0; i < 30; i++) {
+      last = await call('/api/stats/hit', { method: 'POST', body: '{}' });
+      assert.equal(last.status, 200, '第 ' + (i + 1) + ' 次不该被限流');
+    }
+    const r = await call('/api/stats/hit', { method: 'POST', body: '{}' });
+    assert.equal(r.status, 429);
+    assert.equal(r.body.error.code, 'RATE_LIMITED');
+    assert.ok(Number(r.headers.get('retry-after')) > 0, '必须回 Retry-After，让前端知道退避多久');
+    /* 读接口不受影响（契约 §0.6：GET 不限流） */
+    const g = await call('/api/stats');
+    assert.equal(g.status, 200);
+  });
+});
+
+H.test('接口：骨架模式（--allow-degraded）下访问统计回 503，而不是假数字', async () => {
+  const app = await createPublicApp({ port: 0, log: false, allowDegraded: true });
+  await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+  app.setPort(app.server.address().port);
+  const base = 'http://127.0.0.1:' + app.server.address().port;
+  try {
+    const post = await fetch(base + '/api/stats/hit', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
+    });
+    assert.equal(post.status, 503, '库没配好时必须明确失败');
+    assert.equal((await post.json()).error.code, 'DB_UNAVAILABLE');
+    const get = await fetch(base + '/api/stats');
+    assert.equal(get.status, 503);
+  } finally {
+    app.server.close();
+    await app.close();
+  }
+});
+
+/* ============================================================
    九、启动路径：配置缺失必须拒绝启动
    ============================================================ */
 
@@ -1516,3 +1738,11 @@ if (isMain(import.meta.url)) {
   const r = await H.run();
   process.exit(r.fail ? 1 : 0);
 }
+
+/* 导出给 run-all.mjs。
+   【为什么这行是补上的】其余四个 .test.mjs 都写了 `export { H }`，只有本文件没有，
+   于是 run-all.mjs 的 `mod.H || mod.default` 判定为"没有导出 harness → 跳过" ——
+   这一整个公开面测试**一直被静默漏掉**，而 run-all 的合计仍然是绿的。
+   （症状：`run-all` 报 74 项，可单跑本文件就有 78 项。）
+   这里补上，让它进入标准套件；本文件顶部那段"直接执行"的用法不受影响。 */
+export { H };

@@ -51,7 +51,14 @@ ws.onmessage = (e) => {
     events.push('[exception] ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
   }
   if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') {
-    events.push('[log] ' + m.params.entry.text + ' @ ' + (m.params.entry.url || ''));
+    /* /api/auth/me 与 /api/stats/hit 的 404 是**预期内**的：前者是右上角登录
+       入口探一次会话，后者是访问统计计数，而静态预览（.preview/serve.mjs）
+       没有 /api，真机上由 p3-public 应答。
+       只豁免这两条（且必须带 404），别的 4xx/5xx 仍然算错。
+       这处失败与 UI 改动无关：拿 HEAD 的干净站点跑本套件，失败集合与数目完全一致。 */
+    const eUrl = m.params.entry.url || '';
+    const expectedProbe = /\/api\/(auth\/me|stats\/hit)\b/.test(eUrl) && /404/.test(m.params.entry.text);
+    if (!expectedProbe) events.push('[log] ' + m.params.entry.text + ' @ ' + eUrl);
   }
 };
 

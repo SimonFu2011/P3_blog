@@ -14,8 +14,38 @@ node .preview/check-layout.mjs              # 15 种窗口尺寸的溢出与重�
 node .preview/check-mobile-rm.mjs           # 移动端折叠展开 / reduced-motion / 二次入水
 node .preview/verify-pages.mjs              # 内页 108 项功能断言 + 截图（关于我/归档/详情/404）
 node .preview/verify-geo.mjs                # 极简几何页 47 项视觉体检（底板残留 / 悬停位移 / 对比度 / 7 种宽度）
+node .preview/verify-shell.mjs              # 站点外壳 64 项（收起侧边栏 / 访问统计 / 标签云 / 两页一致性 / 13 种宽度）
 node .preview/verify-final.mjs              # 收尾自检 35 项（资源与链接完整性 / 2560 与 320 边界 / 矮窗口抽屉 / reduced-motion / 键盘可达性）
 ```
+
+### 站点外壳（`css/shell.css` + `js/shell.js`）
+
+收起侧边栏、访问统计、标签云这三件事由**同一份外壳**提供，五页共用，
+所以它必须排在每一份皮肤之后（`comments.css` 之后收尾）：
+
+| 页面 | 皮肤 | 外壳怎么接 |
+| --- | --- | --- |
+| 首屏 `index.html` | `style.css`（深水） | 只注入统计条，挂在 `.world` 左下角；入场那一屏保持不可见 |
+| 关于我 / 归档 / 详情 | `pages.css` + `geo.css`（+`prose-light.css`） | 默认别名指向 `--g-*` |
+| 404 | `pages.css`（深水） | `body.skin-deep` 换成 `--white/--fg/--line/--sky-2` 那套别名 |
+
+组件只认 `--ui-*` 别名，不认具体皮肤，所以"换个页面皮肤"改的是别名，不是组件规则。
+
+`verify-shell.mjs` 的 64 项里有几条是**照着截图放大看**才发现的缺陷，值得留着：
+
+- 收起态下"收起按钮不许压住品牌缩写"（两者矩形曾经几乎重合）
+- "三枚图标都必须拿到看得见的颜色"（当前页继承了深色皮肤的白色文字色，
+  `currentColor` 让那一枚图标在白侧栏上整个消失；顺带修掉浅底页当前页导航文字
+  本身也是白字、只剩叠印阴影的问题）
+- "首屏绘制前就已应用收起偏好"（用 `Page.addScriptToEvaluateOnNewDocument`
+  记录 DOMContentLoaded 那一刻的宽度，硬证据：那一刻就已是 76px）
+- 统计条不许与署名 / 命令条 / 时钟重叠
+
+> `/api/auth/me` 的 404 在 `verify-geo` / `verify-pages` 里是**预期内**的豁免：
+> 右上角登录入口加载时探一次会话，而静态预览没有 `/api`（真机由站点后端应答）。
+> 这一条与本轮 UI 改动无关：拿 HEAD 的干净站点跑这两套，失败集合与数目完全一致。
+> `verify-pages` 另有 4 条历史失败（代码块含 `@property` / 正文配图 / 引用块 /
+> 旧评论占位文案），同样在改动前后一致，属于正文内容与旧断言的口径差，未在本轮处理。
 
 ### 管理端（上传 / 更改文章）
 

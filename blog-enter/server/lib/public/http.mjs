@@ -498,8 +498,13 @@ export const RATE_LIMITS = {
   /* 删评论同样限：否则"删掉的评论"会被反复写库 */
   'comment.delete': { windowMs: 10 * 60 * 1000, max: 20, blockMs: 5 * 60 * 1000 },
   /* 认（读）接口不限流：GET /api/comments 是页面的正常流量，
-     给它设一个低阈值等于让正常的翻页/刷新变成 429。 */
-  'auth.logout': { windowMs: 60 * 1000, max: 30, blockMs: 60 * 1000 }
+     给它设一个低阈值等于让正常的翻页/刷新变成 429。
+     注意 GET /api/stats 也因此**不限流**（它只读不写）；
+     真正计数的是 POST /api/stats/hit，见下一条。 */
+  'auth.logout': { windowMs: 60 * 1000, max: 30, blockMs: 60 * 1000 },
+  /* 访问统计计数：每 IP 每分钟 30 次。这是"别让人拿脚本给总访问量灌水"，
+     不是安全闸 —— 正常浏览一分钟点开 30 个页面已经很夸张了。 */
+  'stats.hit': { windowMs: 60 * 1000, max: 30, blockMs: 60 * 1000 }
 };
 
 /** 造一个限流器。进程内存态：服务重启即清零（可接受 —— 重启本身就是攻击者的成本）。 */

@@ -266,6 +266,76 @@
   };
 
   /* ------------------------------------------------------------
+     标签云：同一个维度的"热度视图"
+     ------------------------------------------------------------
+     与上面的标签胶囊是同一份状态（State.tags）的两种画法：
+       · 胶囊 = 精确开关（点一下叠加 / 取消一个标签）
+       · 云   = 按热度浏览（字号与颜色由该标签下的文章数决定）
+     两者共用 toggleTag()，所以任何一边点完，另一边的高亮都会跟着变。
+
+     字号连续：--heat（0~1）× CSS 里的 --tc-range + 基准；
+     颜色三档：CSS 没办法对变量做区间判断，而"三档色 + 连续字号"已经
+     足够表达热度，也更好控制对比度（越热越接近正文色，越冷越淡）。
+
+     "全部"与胶囊里的"不限"含义不同：这里的"全部"= 清空**所有**筛选
+     （含分类），也就是需求里的"恢复完整列表"，所以它调 clearAll()。
+     ------------------------------------------------------------ */
+  const renderCloud = () => {
+    const host = $('#tagCloud');
+    if (!host) return;
+    const row = host.closest('.filter-row');
+    const tags = derived.tagList;
+
+    host.textContent = '';
+    if (!tags.length) {
+      if (row) row.hidden = true;
+      return;
+    }
+    if (row) row.hidden = false;
+
+    const counts = tags.map((t) => t.n);
+    const max = Math.max.apply(null, counts);
+    const min = Math.min.apply(null, counts);
+    /* span 为 0 = 所有标签篇数相同（或只有一个标签）：热度统一按满档，
+       否则会除零，每一枚都变成 0.5 的怪样子 */
+    const span = (max - min) || 1;
+    const same = max === min;
+
+    const push = (cls, label, n, heat, band, pressed, aria, pick) => {
+      const b = el('button', 'tc-tag' + (cls ? ' ' + cls : ''));
+      b.type = 'button';
+      b.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+      b.setAttribute('aria-label', aria);
+      b.style.setProperty('--heat', heat.toFixed(3));
+      if (band) b.dataset.heat = band;
+      b.appendChild(el('span', 'tc-name', label));
+      b.appendChild(el('span', 'tc-n', String(n)));
+      b.addEventListener('click', () => {
+        /* 点一下就把整块云重画了：记下位置，重画后把焦点还给同一枚，
+           否则键盘用户按一次回车，焦点就掉回 <body> 了 */
+        const idx = Array.prototype.indexOf.call(host.children, b);
+        pick();
+        render();
+        const again = host.children[idx];
+        if (again && again.focus) again.focus({ preventScroll: true });
+      });
+      host.appendChild(b);
+    };
+
+    push('tc-all', '全部', total(), 1, null,
+      State.cat === ALL && State.tags.length === 0,
+      '全部文章：清空分类与标签筛选，共 ' + total() + ' 篇', clearAll);
+
+    tags.forEach((t) => {
+      const heat = same ? 1 : (t.n - min) / span;
+      const on = State.tags.indexOf(t.name) >= 0;
+      push('', t.name, t.n, heat, heat >= 0.66 ? 'hot' : heat >= 0.33 ? 'warm' : 'cool', on,
+        '标签 ' + t.name + '：' + t.n + ' 篇' + (on ? '（已选）' : ''),
+        () => toggleTag(t.name));
+    });
+  };
+
+  /* ------------------------------------------------------------
      状态变更
      ------------------------------------------------------------ */
   const toggleTag = (t) => {
@@ -300,6 +370,9 @@
       (name) => name === ALL ? State.tags.length === 0 : State.tags.indexOf(name) >= 0,
       (name) => { toggleTag(name); render(); },
       '不限', total());
+
+    /* 标签云与胶囊共用 State.tags，每次 render 一起重画（顺序即状态） */
+    renderCloud();
 
     /* 计数与"清空"的可用性 */
     const count = $('#filterCount');

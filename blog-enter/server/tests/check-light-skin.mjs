@@ -174,11 +174,14 @@ ok('语法高亮的每个 token 在代码块底色上对比度 ≥ 4.5:1',
   lowContrast.length === 0,
   lowContrast.map((t) => t.tok + ' ' + t.hex + ' = ' + contrast(t.hex).toFixed(2) + ':1').join('，'));
 
-/* 加载顺序：pages → geo → prose-light */
+/* 加载顺序：pages → geo → prose-light → shell（comments.css 可以夹在中间，
+   它只管登录入口与评论区，既不换皮肤也不被皮肤覆盖）。
+   顺序不能换的原因same：同权重规则靠"后加载"取胜，shell.css 必须收尾。 */
 const links = [...articleHtml.matchAll(/href="(css\/[^"]+\.css)"/g)].map((m) => m[1]);
-ok('article.html 的样式表顺序为 pages → geo → prose-light',
-  links.length === 3 && links[0].endsWith('pages.css') && links[1].endsWith('geo.css') &&
-  links[2].endsWith('prose-light.css'),
+const skin = links.filter((h) => !h.endsWith('comments.css'));
+ok('article.html 的样式表顺序为 pages → geo → prose-light → shell',
+  skin.length === 4 && skin[0] === 'css/pages.css' && skin[1] === 'css/geo.css' &&
+  skin[2] === 'css/prose-light.css' && skin[3] === 'css/shell.css',
   links.join(' → '));
 
 /* geo.css 仍然只覆盖骨架：确认正文规则没有跑进 geo.css（保持职责分离） */

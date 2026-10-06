@@ -40,7 +40,18 @@ ws.onmessage = (e) => {
   if (m.id && pending.has(m.id)) { const { res, rej } = pending.get(m.id); pending.delete(m.id); m.error ? rej(new Error(JSON.stringify(m.error))) : res(m.result); return; }
   if (m.method === 'Runtime.exceptionThrown') events.push('[exception] ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
   if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') events.push('[console.error] ' + m.params.args.map((a) => a.value ?? a.description).join(' '));
-  if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') events.push('[log] ' + m.params.entry.text);
+  if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') {
+    /* /api/auth/me 与 /api/stats/hit 的 404 是**预期内**的：前者是右上角登录
+       入口探一次会话，后者是访问统计计数，而静态预览（.preview/serve.mjs）
+       根本没有 /api —— 真机上由 p3-public 应答。
+       只允许这两条（且必须带 404），别的 4xx/5xx 仍然算错
+       （verify-shell.mjs 里有同规则的完整版，并且会把 4xx 的 URL 打出来）。
+       注意：日志文本里没有地址，要判 entry.url 这个字段。 */
+    const url = m.params.entry.url || '';
+    if (!(/\/api\/(auth\/me|stats\/hit)\b/.test(url) && /404/.test(m.params.entry.text))) {
+      events.push('[log] ' + m.params.entry.text + (url ? ' @ ' + url : ''));
+    }
+  }
 };
 const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
 const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });

@@ -10,6 +10,12 @@
      既有变量（--ink/--white/--red/--sky/--font-*），不引入新的设计语言；
      入场遮罩未解除前该入口由 CSS 隐藏（见文件里 §1 的说明）。 -->
 <link rel="stylesheet" href="css/comments.css">
+<!-- 站点外壳（首屏这里只有一条访问统计）—— 排最后，与子页面同一份实现 -->
+<link rel="stylesheet" href="css/shell.css">
+<!-- 统计条由 shell.js 注入 .world 的左下角（入场那一屏保持纯白，
+     入水后才淡入）。它在 <head> 里同步加载：子页面的"侧边栏收起偏好"
+     必须在这一刻应用到 <html data-nav>，见 js/shell.js 开头。 -->
+<script src="js/shell.js"></script>
 </head>
 <body class="is-entry">
 

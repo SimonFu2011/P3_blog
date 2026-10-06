@@ -47,8 +47,19 @@ const iArt = scripts.indexOf('js/article.js');
 ok('article.html 脚本顺序 auth-ui → comments → article', iAuth >= 0 && iAuth < iCm && iCm < iArt,
   JSON.stringify(scripts));
 const links = (a.match(/<link rel="stylesheet" href="([^"]+)"/g) || []).map((m) => m.replace(/.*"([^"]+)"/, '$1'));
-ok('article.html 的 comments.css 排在最后（要覆盖旧评论区样式）',
-  links[links.length - 1] === 'css/comments.css', JSON.stringify(links));
+/* "comments.css 必须最后"的真实含义是"它必须排在每一份皮肤之后"。
+   shell.css 是**外壳部件**（收起侧边栏 / 访问统计 / 标签云），
+   它里面没有一条评论区或登录入口的样式，所以允许它收尾；
+   下面这条正向约束（shell.css 里不许出现 comments/auth 选择器）
+   就是为了保证这个"允许"一直成立，而不是变成一句口头承诺。 */
+const skinLinks = links.filter((h) => h !== 'css/shell.css');
+ok('article.html 的 comments.css 排在所有皮肤之后（要覆盖旧评论区样式）',
+  skinLinks[skinLinks.length - 1] === 'css/comments.css', JSON.stringify(links));
+ok('article.html 的 shell.css 收尾（外壳部件必须盖在皮肤之上）',
+  links[links.length - 1] === 'css/shell.css', JSON.stringify(links));
+const shellCss = await readFile(BLOG + 'css\\shell.css', 'utf8').catch(() => '');
+ok('shell.css 不碰评论区 / 登录入口（所以它可以排在 comments.css 之后）',
+  shellCss.length > 0 && !/\.comments|#comments|comments-|\.auth-|\.cm-|\.waline/.test(shellCss.replace(/\/\*[\s\S]*?\*\//g, '')));
 
 /* 5. 两个新脚本里不许出现 innerHTML */
 for (const f of ['js\\comments.js', 'js\\auth-ui.js']) {

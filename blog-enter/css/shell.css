@@ -1,0 +1,437 @@
+/* ============================================================
+   站点外壳（shell）—— 跨页共用的三个部件
+   ------------------------------------------------------------
+   加载顺序：所有页面都把它放在**最后一份**样式表之后
+     pages.css → geo.css → prose-light.css → comments.css → shell.css
+   它是"同一个部件在所有页面长得一样"的唯一出处：改一次，五页同步。
+   不再往 pages.css（深水底）与 geo.css（纯白几何）里各写一份 ——
+   一份规则写两遍，正是之前两页风格慢慢漂开的根源。
+
+   三件事：
+     1) 侧边栏收起 / 展开（桌面端收成图标栏，偏好写 localStorage）
+     2) 访问统计条（首屏左下角 + 内页页脚上方）
+     3) 标签云（归档页，热度 = 标签下的文章数）
+
+   皮肤接法：组件只认下面这组 --ui-* 别名，别名再各自指向站点既有的令牌：
+     · 默认（body 无类）—— 纯白几何页：geo.css 的 --g-*
+     · body.skin-deep   —— 深水底页（404）：pages.css 的 --white/--fg/--line/--sky-2
+     · .world           —— 首屏：style.css 的深水变量（入场那一屏整体隐藏）
+   于是"同一个部件换皮肤"只是换别名，组件规则一条都不用重复。
+
+   三级圆角（全站统一，不再各写各的）：
+     --ui-r-card  2px    面板 / 气泡（统计条、标签、提示气泡）
+     --ui-r-pill  999px  胶囊（筛选、视图切换、抽屉与收起按钮）
+     寄存器行（文章行 / 联系行 / 小节分隔）保持直角 0 —— 它靠发丝线分隔，不靠边框
+   ============================================================ */
+
+:root {
+  --ui-hair: 1px;
+  --ui-r-card: 2px;
+  --ui-r-pill: 999px;
+
+  /* 间距档位：小节节奏 / 标题到发丝线 / 发丝线到内容 */
+  --ui-sect-gap: clamp(38px, 6vh, 76px);
+  --ui-head-gap: 14px;
+  --ui-body-gap: clamp(20px, 3vh, 34px);
+
+  /* 侧边栏收起后的图标栏 */
+  --ui-rail-w: 76px;
+  --ui-rail-gap: clamp(18px, 3vw, 40px);
+
+  /* 字号档位：小标签 / 次级小字 */
+  --ui-fs-xs: 11px;
+  --ui-fs-sm: 12.5px;
+
+  /* 缓动：沿用站内既有曲线（与 --g-* 皮肤无关，所以放这里） */
+  --ui-ease: cubic-bezier(.2, 1.3, .4, 1);
+
+  /* ---- 皮肤别名：默认 = 纯白几何页（geo.css 的令牌）---- */
+  --ui-fg: var(--g-ink, #071523);
+  --ui-fg-2: var(--g-teal-2, #14536b);
+  --ui-mute: var(--g-mute, #5b7284);
+  --ui-mute-2: var(--g-mute-2, #7d95a6);
+  --ui-cyan: var(--g-cyan-dk, #0b6a97);
+  --ui-accent: var(--g-red-dk, #c8102e);
+  --ui-line: var(--g-rule, rgba(11, 52, 70, .16));
+  --ui-line-2: var(--g-rule-2, rgba(11, 52, 70, .34));
+  --ui-panel-2: var(--g-paper, #f7fbfe);
+  --ui-tip-bg: var(--g-ink, #071523);
+  --ui-tip-fg: #ffffff;
+  --ui-shadow: var(--g-shadow, 0 18px 44px -28px rgba(7, 21, 35, .34));
+}
+
+/* 深水底（404.html：只加载 pages.css）。注意：这一页没有 --g-* 变量，
+   所以下面的别名必须把组件用到的每一项都指到 pages.css 的令牌上。 */
+body.skin-deep {
+  --ui-fg: var(--white, #ffffff);
+  --ui-fg-2: var(--fg, rgba(233, 248, 255, .93));
+  --ui-mute: var(--fg-3, rgba(168, 208, 228, .58));
+  --ui-mute-2: var(--fg-3, rgba(168, 208, 228, .58));
+  --ui-cyan: var(--sky-2, #7dd3fc);
+  --ui-accent: var(--red, #ff1f3d);
+  --ui-line: var(--line, rgba(125, 211, 252, .22));
+  --ui-line-2: var(--line-2, rgba(125, 211, 252, .38));
+  --ui-panel-2: rgba(4, 22, 38, .45);
+  --ui-tip-bg: rgba(233, 248, 255, .96);
+  --ui-tip-fg: #071523;
+  --ui-shadow: 0 18px 44px -28px rgba(0, 0, 0, .6);
+}
+
+/* 首屏（index.html）：深水里的低对比小字，与 .credit / .cmdbar 同一档 */
+.world {
+  --ui-fg: var(--white, #ffffff);
+  --ui-fg-2: rgba(214, 240, 252, .82);
+  --ui-mute: rgba(168, 208, 228, .7);
+  --ui-mute-2: rgba(168, 208, 228, .6);
+  --ui-cyan: rgba(190, 245, 255, .78);
+  --ui-accent: var(--red, #ff1f3d);
+  --ui-line: rgba(125, 211, 252, .22);
+  --ui-line-2: rgba(125, 211, 252, .38);
+  --ui-panel-2: rgba(4, 22, 38, .34);
+}
+
+/* ------------------------------------------------------------
+   1. 侧边栏收起 / 展开（仅桌面端）
+   ------------------------------------------------------------
+   状态写在 <html data-nav="collapsed">：由 js/shell.js 在**首屏绘制之前**
+   从 localStorage 读出来写进 DOM，所以刷新后不会看到"先展开再收起"的闪动。
+   ≤980px 完全不参与 —— 那一档侧边栏是顶部抽屉（MENU 按钮），
+   下面所有规则都被关在 @media (min-width: 981px) 里。
+   ------------------------------------------------------------ */
+.nav-rail { display: none; }
+
+/* 收起态才出现的品牌缩写（字由 shell.js 从站名首字写入，兜底 "S"） */
+.nav-brand-mark {
+  display: none;
+  position: relative;
+  width: 40px; height: 40px;
+  place-items: center;
+  border: var(--ui-hair) solid var(--ui-line-2);
+  font-family: var(--font-en);
+  font-size: 19px; font-weight: 900; font-style: italic;
+  color: var(--ui-fg);
+}
+.nav-brand-mark::before {
+  content: "";
+  position: absolute; left: -7px; top: 50%;
+  width: 4px; height: 16px; margin-top: -8px;
+  background: var(--ui-accent);
+  transform: skewY(-16deg);
+}
+
+/* 图标（收起态显示，展开态隐藏） */
+.nl-ic { display: none; width: 24px; height: 24px; }
+.nl-ic svg {
+  display: block; width: 100%; height: 100%;
+  fill: none; stroke: currentColor; stroke-width: 1.5;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+@media (min-width: 981px) {
+  .nav { transition: width .26s var(--ui-ease), padding-left .26s var(--ui-ease); }
+  .page { transition: padding-left .26s var(--ui-ease); }
+
+  /* 收起 / 展开按钮：挂在 .nav 的右上角（.nav 是 fixed，它就是包含块） */
+  .nav-rail {
+    position: absolute;
+    top: clamp(24px, 3.6vh, 46px);
+    right: 14px;
+    z-index: 2;
+    display: grid; place-items: center;
+    width: 32px; height: 32px;
+    padding: 0;
+    border: var(--ui-hair) solid var(--ui-line-2);
+    border-radius: var(--ui-r-pill);
+    background: transparent;
+    color: var(--ui-fg-2);
+    cursor: pointer;
+    transition: color .18s ease, border-color .18s ease, background .18s ease;
+  }
+  .nav-rail:hover { border-color: var(--ui-accent); color: var(--ui-accent); }
+  .nav-rail:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
+  .nav-rail .nr-ic {
+    width: 18px; height: 18px;
+    fill: none; stroke: currentColor; stroke-width: 1.4;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  /* 箭头翻转 = 收起 ⇄ 展开。SVG 默认的 transform-box 是 view-box，
+     不写 fill-box 的话它会绕整个画布中心转，箭头会跑出按钮 */
+  .nav-rail .nr-arrow {
+    transform-box: fill-box;
+    transform-origin: center;
+    transition: transform .26s var(--ui-ease);
+  }
+  /* 展开态给品牌留出按钮的位置：长站名（"SIMON 的个人站"）在 1440 下
+     右边缘离按钮只剩几像素，不加这条就会被压在一起 */
+  .nav-brand { padding-right: 44px; }
+
+  /* ---------- 收起态 ---------- */
+  html[data-nav="collapsed"] .nav {
+    width: var(--ui-rail-w);
+    padding-left: 0;
+    align-items: center;
+  }
+  /* 内容区跟着让位：这里用的是 --ui-* 而不是 --g-nav / --nav-w，
+     所以两种皮肤（纯白几何 / 深水底）走的是同一条规则 */
+  html[data-nav="collapsed"] .page {
+    padding-left: calc(var(--ui-rail-w) + var(--ui-rail-gap));
+  }
+  /* 收起态：品牌那一列改成一竖排、收起按钮排到最上面。
+     不能继续用"绝对定位 + 居中"——那样它正好压在品牌缩写上
+     （实测 32px 圆钮 [22,32] 与 40px 方块 [18,36] 的矩形几乎重合）。 */
+  html[data-nav="collapsed"] .nav-bar {
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+  }
+  html[data-nav="collapsed"] .nav-rail {
+    position: static; right: auto; top: auto; transform: none; order: -1;
+  }
+  html[data-nav="collapsed"] .nav-rail .nr-arrow { transform: scaleX(-1); }
+
+  html[data-nav="collapsed"] .nav-brand { padding-right: 0; justify-items: center; }
+  html[data-nav="collapsed"] .nav-brand-mark { display: grid; }
+  html[data-nav="collapsed"] .nav-brand-name,
+  html[data-nav="collapsed"] .nav-brand-tag { display: none; }
+
+  html[data-nav="collapsed"] .nav-list { width: 100%; justify-items: center; gap: 8px; }
+  html[data-nav="collapsed"] .nav-link {
+    display: grid; place-items: center;
+    width: 46px; height: 46px; margin: 0 auto; padding: 0;
+    border-radius: var(--ui-r-card);
+    /* 文字全部隐藏，字号归零可以让 ::before 里那些 em 尺寸的重音记号
+       不再影响布局（图标是 SVG，不受字号影响） */
+    font-size: 0;
+  }
+  html[data-nav="collapsed"] .nav-link .nl-en,
+  html[data-nav="collapsed"] .nav-link .nl-cn { display: none; }
+  html[data-nav="collapsed"] .nl-ic { display: grid; place-items: center; }
+  /* 图标颜色显式指定，不吃链接自身的 color：
+     深水皮肤（pages.css）里"当前页"的文字色是白色，浅底页历史上没覆盖它，
+     于是 currentColor 会让这一枚图标在白侧栏上直接消失（实测
+     .nav-link[aria-current="page"] 的 color = rgb(255,255,255)）。
+     浅底那一侧的颜色缺陷已在 geo.css 里一并修掉，这里再钉一道，
+     保证图标栏永远读得到能看见的颜色。 */
+  html[data-nav="collapsed"] .nav-link .nl-ic { color: var(--ui-fg); }
+  html[data-nav="collapsed"] .nav-link.is-todo .nl-ic { color: var(--ui-mute-2); }
+  html[data-nav="collapsed"] .nav-link:hover .nl-ic { color: var(--ui-accent); }
+  /* 收起态不用位移/缩放做反馈：那套是给"文字菜单"用的，
+     图标栏要的是像按钮一样被按下的观感 */
+  html[data-nav="collapsed"] .nav-link:hover,
+  html[data-nav="collapsed"] .nav-link[aria-current="page"] { transform: none; }
+  html[data-nav="collapsed"] .nav-link:hover { background: var(--ui-panel-2); }
+  html[data-nav="collapsed"] .nav-link[aria-current="page"]::before {
+    left: 2px; top: 12px; bottom: 12px; width: 3px;
+  }
+
+  html[data-nav="collapsed"] .nav-foot {
+    width: 100%; justify-items: center;
+    padding-top: 0; border-top: 0;
+  }
+  html[data-nav="collapsed"] .nav-back::before { content: none; }
+  html[data-nav="collapsed"] .nav-back .nb-text,
+  html[data-nav="collapsed"] .nav-foot [data-year] { display: none; }
+  html[data-nav="collapsed"] .nav-back { padding: 6px 4px; color: var(--ui-accent); }
+
+  /* 收起态的文字说明：鼠标悬停 / 键盘聚焦时从图标右侧浮出。
+     文字来自 data-tip（shell.js 从导航文案写入），不额外维护一份清单。 */
+  html[data-nav="collapsed"] .nav-link::after,
+  html[data-nav="collapsed"] .nav-back::after {
+    content: attr(data-tip);
+    position: absolute;
+    left: calc(100% + 12px); top: 50%;
+    z-index: 3;
+    padding: 5px 11px;
+    border: var(--ui-hair) solid var(--ui-line-2);
+    border-radius: var(--ui-r-card);
+    background: var(--ui-tip-bg);
+    color: var(--ui-tip-fg);
+    font-family: var(--font-jp);
+    font-style: normal; font-weight: 400;
+    font-size: 12px; letter-spacing: .08em;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-6px, -50%);
+    transition: opacity .18s ease, transform .18s ease;
+  }
+  html[data-nav="collapsed"] .nav-link:hover::after,
+  html[data-nav="collapsed"] .nav-link:focus-visible::after,
+  html[data-nav="collapsed"] .nav-back:hover::after,
+  html[data-nav="collapsed"] .nav-back:focus-visible::after {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+}
+
+/* ------------------------------------------------------------
+   2. 访问统计条
+   ------------------------------------------------------------
+   内页（关于我 / 归档 / 详情 / 404）：由 shell.js 插到 .foot 之前，
+   是文档流里的一行，不遮挡任何东西。
+   首屏：插进 .world，固定左下角、在 .credit 之上；入场那一屏保持纯白
+   （opacity 0），入水后才淡入 —— 与 .cmdbar / .credit 同一套节拍。
+   ------------------------------------------------------------ */
+.stats {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 8px 22px;
+  padding: 14px 2px;
+  border-top: var(--ui-hair) solid var(--ui-line);
+  font-size: var(--ui-fs-xs);
+  letter-spacing: .14em;
+  color: var(--ui-mute);
+}
+.stats[hidden] { display: none; }
+.stats-kicker {
+  font-family: var(--font-en);
+  font-size: var(--ui-fs-xs); font-weight: 900; font-style: italic;
+  letter-spacing: .3em;
+  color: var(--ui-cyan);
+}
+.stats-kicker::before {
+  content: ""; display: inline-block;
+  width: 16px; height: 2px; margin-right: 8px;
+  background: var(--ui-accent);
+  transform: skewX(-16deg) translateY(-3px);
+}
+.stats-list {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 8px 22px;
+  margin: 0;
+}
+.stat { display: inline-flex; align-items: baseline; gap: 8px; }
+.stat-k { letter-spacing: .14em; }
+.stat-v {
+  /* <dd> 默认有 40px 的左外边距，会把每一对数拆开 */
+  margin: 0;
+  font-family: var(--font-num);
+  font-size: 15px; letter-spacing: .06em;
+  color: var(--ui-fg);
+}
+.stats-src { margin-left: auto; font-size: 10.5px; letter-spacing: .12em; color: var(--ui-mute-2); }
+
+.world .stats {
+  position: absolute;
+  left: clamp(18px, 3.2vw, 56px);
+  bottom: calc(clamp(18px, 3vh, 40px) + 26px);
+  z-index: 20;
+  padding: 0;
+  border-top: 0;
+  font-size: 10.5px;
+  gap: 6px 16px;
+  opacity: 0;
+  transition: opacity .6s ease;
+  /* 它只是"读一眼"的信息，不参与命中：扇形菜单与时钟的点击一概不受影响 */
+  pointer-events: none;
+}
+.world .stats .stats-list { gap: 6px 16px; }
+.world .stats .stat-v { font-size: 13.5px; }
+body.is-underwater .world .stats,
+body.is-settled .world .stats { opacity: .92; }
+
+/* ------------------------------------------------------------
+   3. 标签云（归档页）
+   ------------------------------------------------------------
+   热度 = 该标签下的文章数（0~1 归一化，由 archive.js 写成 --heat）。
+   字号连续：--tc-min + --heat × --tc-range（两端由 CSS 定，脚本只给热度）。
+   颜色分三档：CSS 没办法对变量做区间判断，而"三档色 + 连续字号"已经足够
+   表达热度，也更好控制对比度（热度越低越接近 --ui-mute，越高越接近正文色）。
+   ------------------------------------------------------------ */
+.filter-row-cloud { align-items: flex-start; }
+.tagcloud {
+  --tc-min: 13px;
+  --tc-range: 17px;
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  /* 行距给 2px 就够：每一枚自己已经有 6px 的上下内距（那是点击目标），
+     两者相加才是眼睛看到的间距 —— 写 6px 会显得云朵散开 */
+  gap: 2px clamp(10px, 1.5vw, 20px);
+  min-width: 0;
+}
+.tc-tag {
+  --heat: 0;
+  display: inline-flex; align-items: baseline; gap: 6px;
+  /* 内距不只是好看：标签云里每一枚都是可点目标，必须满足 WCAG 2.2 的目标尺寸下限
+     （24×24 CSS px）。原来写成 2px 4px 时最冷的那一档实测只有 43×20 ——
+     拇指点不中，自动化体检也会把它列出来。现在最小的那一档约 28px 高。 */
+  padding: 6px 9px;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--ui-r-card);
+  background: none;
+  font-family: var(--font-jp);
+  font-size: calc(var(--tc-min) + var(--heat) * var(--tc-range));
+  line-height: 1.2;
+  letter-spacing: .015em;
+  color: var(--ui-mute);
+  cursor: pointer;
+  transition: color .18s ease, background .18s ease, transform .2s var(--ui-ease);
+}
+.tc-tag[data-heat="warm"] { color: var(--ui-cyan); }
+.tc-tag[data-heat="hot"] { color: var(--ui-fg); }
+.tc-n {
+  font-family: var(--font-num);
+  font-size: .56em; letter-spacing: .04em;
+  color: var(--ui-mute-2);
+  transition: color .18s ease;
+}
+/* 悬停：整枚抬起来 + 让位给重音色 —— 标签云里"能点"必须一眼看出来 */
+.tc-tag:hover { color: var(--ui-accent); background: var(--ui-panel-2); transform: translateY(-2px); }
+.tc-tag:hover .tc-n { color: var(--ui-accent); }
+.tc-tag:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
+/* 选中：反色底 + 下沿一条重音线。刻意不用胶囊的"整块反色"——
+   那样会和上面的分类 / 标签胶囊混成同一层级 */
+.tc-tag[aria-pressed="true"] {
+  color: var(--ui-fg);
+  background: var(--ui-panel-2);
+  box-shadow: inset 0 -2px 0 var(--ui-accent);
+}
+.tc-tag[aria-pressed="true"] .tc-n { color: var(--ui-accent); }
+/* "全部"：不按热度缩放，固定字号 + 红斜线，作为"清空所有筛选"的落点 */
+.tc-all {
+  font-size: calc(var(--tc-min) + 3px);
+  font-weight: 700; letter-spacing: .1em;
+  color: var(--ui-fg-2);
+}
+.tc-all::before {
+  content: ""; align-self: center;
+  width: 12px; height: 2px;
+  background: var(--ui-accent);
+  transform: skewX(-16deg);
+}
+
+/* ------------------------------------------------------------
+   4. 统一表：同一角色的元素在两页必须同字号 / 同圆角
+   ------------------------------------------------------------
+   这里只做"收敛"，不引入新观感：以前是各写各的
+   （.filter-reset 在纯白页 12px、在深水页 12.5px；.section-note 11.5 / 12px），
+   于是同一类东西在两页差半个像素 —— 单看都正常，并排看就不齐。
+   ------------------------------------------------------------ */
+.section { margin-top: var(--ui-sect-gap); }
+.section-head { padding-bottom: var(--ui-head-gap); }
+.section-body { padding-top: var(--ui-body-gap); }
+.section-note { font-size: var(--ui-fs-xs); }
+.chip, .view-switch, .filter-reset, .nav-toggle { border-radius: var(--ui-r-pill); }
+.chip { font-size: 13px; }
+.filter-reset, .view-btn, .nav-toggle { font-size: var(--ui-fs-sm); }
+.filter-count { font-size: var(--ui-fs-sm); }
+
+/* ------------------------------------------------------------
+   5. 响应式
+   ------------------------------------------------------------ */
+@media (max-width: 980px) {
+  /* 抽屉档：收起按钮、图标栏、品牌缩写都不参与（这一档由 MENU 负责） */
+  .nav-rail, .nl-ic, .nav-brand-mark { display: none; }
+  .stats { gap: 6px 16px; }
+  /* 数据来源换行，别把三个数字挤成两行 */
+  .stats-src { margin-left: 0; width: 100%; }
+}
+@media (max-width: 620px) {
+  .tagcloud { --tc-min: 12px; --tc-range: 10px; }
+  .stats { padding: 12px 2px; }
+  /* 窄屏只留数字：英文抬头那 60px 会让三个数字被挤到第二行 */
+  .stats-kicker { display: none; }
+  .world .stats { left: 16px; right: 16px; bottom: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav, .page, .nav-rail .nr-arrow { transition: none; }
+  .tc-tag:hover { transform: none; }
+}

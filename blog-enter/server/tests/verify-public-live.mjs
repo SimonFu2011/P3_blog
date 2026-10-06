@@ -308,6 +308,9 @@ const makeMemoryStores = ({ fail, down = false, boom = false, noThrottleGate = f
   const comments = new Map();
   const throttle = new Map();
   const authLogRows = [];
+  /* 访问统计：STATS_DAY 固定成一个确定值，断言里就不必跟着系统时间跑 */
+  const statsRows = [];
+  const STATS_DAY = '2026-10-06';
   const calls = { findUserByLogin: 0, createUser: 0, createSession: 0, createComment: 0, resolveSession: 0, markCommentDeleted: 0 };
   let nextUserId = 1;
   let nextCommentId = 1;
@@ -335,7 +338,7 @@ const makeMemoryStores = ({ fail, down = false, boom = false, noThrottleGate = f
 
   return {
     mode: 'memory-verify',
-    users, sessions, comments, throttle, authLogRows, calls,
+    users, sessions, comments, throttle, authLogRows, calls, statsRows,
 
     /** 直接塞一行用户（绕开 register 的限流，用于给别的场景铺数据） */
     seedUser({ username, email, password = 'a-good-password', role = 'user', status = 'active' }) {
@@ -497,6 +500,18 @@ const makeMemoryStores = ({ fail, down = false, boom = false, noThrottleGate = f
     },
     async authThrottleSuccess(ip, action) { return throttle.delete(ip + '|' + action); },
     async authLog(entry) { authLogRows.push(entry); return true; },
+    /* 访问统计（契约 §1.8 / §1.9）：形状与真实现一致。
+       真实现的 HMAC + SQL 由 public-api.test.mjs 的"六之二"用假 db 句柄单测；
+       这里只提供"记一次、能汇总"的行为，供 HTTP 层与前端接线验证。 */
+    statsRows,
+    async statsHit({ ip, ua, path }) {
+      statsRows.push({ ip, ua, path, day: STATS_DAY });
+      return { total: statsRows.length, today: statsRows.length, visitors: statsRows.length ? 1 : 0, day: STATS_DAY };
+    },
+    async statsSummary() {
+      const n = statsRows.length;
+      return { total: n, today: n, visitors: n ? 1 : 0, day: STATS_DAY };
+    },
     async close() {}
   };
 };
@@ -540,7 +555,7 @@ const runLocalStatic = async () => {
         });
     }
 
-    await it('A-01', '--print-config（骨架模式）暴露的常量与契约一致：7 条路由 / cookie 名 / 限流阈值 / 会话天数',
+    await it('A-01', '--print-config（骨架模式）暴露的常量与契约一致：9 条路由 + mine / cookie 名 / 限流阈值 / 会话天数',
       'node public-server.mjs --allow-degraded --print-config', () => {
         const r = runCli([join(BLOG_DIR, 'server', 'public-server.mjs'), '--allow-degraded', '--print-config'], {});
         must(r.code === 0, 'exit 0', { status: r.code, text: r.stderr });
@@ -554,12 +569,14 @@ const runLocalStatic = async () => {
           'GET /api/auth/me (optional)',
           'GET /api/comments (optional)',
           'GET /api/comments/mine (required)',
+          'GET /api/stats (none)',
           'POST /api/auth/login (none)',
           'POST /api/auth/logout (none)',
           'POST /api/auth/register (none)',
-          'POST /api/comments (required)'
+          'POST /api/comments (required)',
+          'POST /api/stats/hit (none)'
         ].sort();
-        must(JSON.stringify(routes) === JSON.stringify(want), '路由表必须恰为契约的 7 个端点 + mine', routes);
+        must(JSON.stringify(routes) === JSON.stringify(want), '路由表必须恰为契约的 9 个端点 + mine', routes);
         must(cfg.cookie === 'p3_uid', 'cookie 名必须是 p3_uid', cfg.cookie);
         must(cfg.sessionMaxAgeDays === 30, '会话 30 天', cfg.sessionMaxAgeDays);
         must(cfg.rateLimits['auth.login'].max === 10 && cfg.rateLimits['auth.login'].windowMs === 900000,
@@ -571,6 +588,9 @@ const runLocalStatic = async () => {
           '发评论限流 20 次/10 分钟', cfg.rateLimits['comment.create']);
         must(cfg.rateLimits['auth.logout'].max === 30 && cfg.rateLimits['auth.logout'].windowMs === 60000,
           '登出限流 30 次/分钟', cfg.rateLimits['auth.logout']);
+        must(cfg.rateLimits['stats.hit'] && cfg.rateLimits['stats.hit'].max === 30
+          && cfg.rateLimits['stats.hit'].windowMs === 60000,
+        '访问统计限流必须是契约 §0.6 的 30 次/分钟', cfg.rateLimits['stats.hit']);
         must(cfg.errorCodes.RATE_LIMITED === 429 && cfg.errorCodes.DB_UNAVAILABLE === 503 && cfg.errorCodes.FORBIDDEN === 403,
           '错误码表 429/503/403 与契约一致', cfg.errorCodes);
         /* 库内 auth_throttle 的阈值也是冻结契约的一部分（§0.6 表下方那段）：
@@ -1342,6 +1362,72 @@ const runLocalEndpoints = async (deps) => {
     } finally { await stopLocal(h); }
   });
 
+  /* ---------- 8b) 访问统计（契约 §1.8 / §1.9） ---------- */
+  await group('本地 8b：访问统计（POST /api/stats/hit 计数、GET /api/stats 只读、405/415/429）', async () => {
+    const stores = makeMemoryStores(deps);
+    const h = await startLocal(deps, stores);
+    try {
+      const { call, app } = h;
+      app.rate.reset();
+
+      await it('A-113', 'POST /api/stats/hit → 200 + stats{total,today,visitors,day}，每次调用都是一次 PV',
+        `curl -s -X POST ${'<base>'}/api/stats/hit -H 'Content-Type: application/json' -d '{}'`, async () => {
+          const r1 = await call('/api/stats/hit', { method: 'POST', body: {} });
+          must(r1.status === 200, '应回 200', r1);
+          must(r1.body.ok === true, 'ok:true', r1.body);
+          must(JSON.stringify(Object.keys(r1.body.stats).sort()) === '["day","today","total","visitors"]',
+            'stats 的键集合必须恰为 day/today/total/visitors', Object.keys(r1.body.stats));
+          must(r1.body.stats.total === 1 && r1.body.stats.today === 1, '第一次调用后 total=today=1', r1.body.stats);
+          const r2 = await call('/api/stats/hit', { method: 'POST', body: {} });
+          must(r2.body.stats.total === 2, '第二次调用后 total=2（PV 语义）', r2.body.stats);
+          must(stores.statsRows.length === 2, '数据层必须真的被调用两次', stores.statsRows.length);
+          must(stores.statsRows[0].path === '/api/stats/hit',
+            'path 由服务端自己取（不接受客户端上报"我访问了哪一页"）', stores.statsRows[0]);
+          must(r1.headers.get('cache-control') === 'no-store', 'Cache-Control: no-store', r1.headers.get('cache-control'));
+          return `HTTP 200 total=${r1.body.stats.total}→${r2.body.stats.total} day=${r1.body.stats.day}`;
+        });
+
+      await it('A-114', 'GET /api/stats 只读不计数；POST /api/stats 与 GET /api/stats/hit → 405 + Allow',
+        `curl -s ${'<base>'}/api/stats`, async () => {
+          const before = stores.statsRows.length;
+          const g1 = await call('/api/stats');
+          must(g1.status === 200, 'GET /api/stats 必须 200', g1);
+          must(g1.body.stats.total === before, 'total 必须等于已记录的条数', g1.body.stats);
+          await call('/api/stats');
+          must(stores.statsRows.length === before, 'GET 不允许写库', stores.statsRows.length);
+          const wrong = await call('/api/stats', { method: 'POST', body: {} });
+          must(wrong.status === 405 && wrong.body.error.code === 'METHOD_NOT_ALLOWED', 'POST /api/stats → 405', wrong);
+          must((wrong.headers.get('allow') || '').includes('GET'), '405 必须带 Allow: GET', wrong.headers.get('allow'));
+          const wrong2 = await call('/api/stats/hit');
+          must(wrong2.status === 405 && (wrong2.headers.get('allow') || '').includes('POST'),
+            'GET /api/stats/hit → 405 + Allow: POST', wrong2);
+          return `GET /api/stats=200（total 不变）；405 两条都带 Allow`;
+        });
+
+      await it('A-115', '写接口必须 application/json：POST /api/stats/hit 缺 content-type → 415',
+        `curl -s -o /dev/null -w '%{http_code}' -X POST ${'<base>'}/api/stats/hit`, async () => {
+          const r = await call('/api/stats/hit', { method: 'POST' });
+          must(r.status === 415 && r.body.error.code === 'UNSUPPORTED_MEDIA_TYPE', '应回 415', r);
+          return 'HTTP 415（跨站表单也发不进来）';
+        });
+
+      await it('A-116', '限流：第 31 次 POST /api/stats/hit → 429 + Retry-After（GET 不受影响）',
+        `# 连打 31 次 POST /api/stats/hit`, async () => {
+          app.rate.reset();
+          for (let i = 0; i < 30; i++) {
+            const ok = await call('/api/stats/hit', { method: 'POST', body: {} });
+            must(ok.status === 200, `第 ${i + 1} 次不该被限流`, ok.status);
+          }
+          const r = await call('/api/stats/hit', { method: 'POST', body: {} });
+          must(r.status === 429 && r.body.error.code === 'RATE_LIMITED', '第 31 次必须 429', r);
+          must(Number(r.headers.get('retry-after')) > 0, '必须带 Retry-After', r.headers.get('retry-after'));
+          const g = await call('/api/stats');
+          must(g.status === 200, '读接口不受写接口限流影响（契约 §0.6）', g);
+          return `31 次 → 429（Retry-After=${r.headers.get('retry-after')}s）；GET 仍 200`;
+        });
+    } finally { await stopLocal(h); }
+  });
+
   /* ---------- 9) 通用 ---------- */
   await group('本地 9：OPTIONS / 404 / 405 / 来源判定（Host 与 Origin）', async () => {
     const stores = makeMemoryStores(deps);
@@ -1895,6 +1981,49 @@ const runLive = async (base) => {
           must(r.status === 404, `${p} 必须 404（实测 ${r.status}）`, r.text.slice(0, 120));
         }
         return '/package.json → 404；/server/package.json → 404；/server/public-server.mjs → 404';
+      });
+  });
+
+  /* -------- 访问统计（契约 §1.8 / §1.9）：线上真实 HTTP，真写一行 -------- */
+  await group(`线上 ${base}：访问统计（真计数，会写一行 page_views）`, async () => {
+    if (ROWS.some((r) => r.id === 'B-' + tag + '-01' && !r.pass)) {
+      throw new AbortGroup('连通性/me 前置失败，访问统计未执行');
+    }
+    const g0 = await call('/api/stats');
+    await it('B-' + tag + '-03', 'GET /api/stats → 200 + stats{total,today,visitors,day} + no-store',
+      `curl -s ${base}/api/stats`, () => {
+        must(g0.status === 200, `应回 200（实测 ${g0.status}）—— 404 说明 nginx 白名单还没加 /api/stats`, g0);
+        must(g0.body && g0.body.ok === true, 'ok:true', g0.body);
+        const s = (g0.body && g0.body.stats) || {};
+        must(JSON.stringify(Object.keys(s).sort()) === '["day","today","total","visitors"]',
+          'stats 的键集合必须恰为 day/today/total/visitors（多了就是实现里混进了别的东西）', Object.keys(s));
+        for (const k of ['total', 'today', 'visitors']) {
+          must(typeof s[k] === 'number' && s[k] >= 0, `${k} 必须是非负数字（字符串会让前端显示成原样）`, s);
+        }
+        must(/^\d{4}-\d{2}-\d{2}$/.test(String(s.day)), 'day 必须是 YYYY-MM-DD', s.day);
+        must(g0.headers.get('cache-control') === 'no-store', 'Cache-Control: no-store', g0.headers.get('cache-control'));
+        return `HTTP 200 total=${s.total} today=${s.today} visitors=${s.visitors} day=${s.day}`;
+      });
+    await it('B-' + tag + '-04', 'POST /api/stats/hit → 200，total 恰好 +1，today/visitors ≥ 1',
+      `curl -s -X POST ${base}/api/stats/hit -H 'Content-Type: application/json' -d '{}'`, async () => {
+        const r = await call('/api/stats/hit', { method: 'POST', body: {} });
+        must(r.status === 200, `应回 200（实测 ${r.status}）`
+          + '：415 说明 nginx 没把 content-type 传过去，429 说明本机已被限流（等一分钟重跑）', r);
+        const before = (g0.body && g0.body.stats && g0.body.stats.total) || 0;
+        must(r.body.stats.total === before + 1, `total 必须恰好 +1（${before} → ${r.body.stats.total}）`, r.body.stats);
+        must(r.body.stats.today >= 1, 'today 必须 ≥ 1', r.body.stats);
+        must(r.body.stats.visitors >= 1, 'visitors 必须 ≥ 1', r.body.stats);
+        return `total ${before} → ${r.body.stats.total}；today=${r.body.stats.today} visitors=${r.body.stats.visitors}`;
+      });
+    await it('B-' + tag + '-05', 'GET /api/stats/hit → 405 + Allow: POST；缺 content-type → 415',
+      `curl -s -i ${base}/api/stats/hit`, async () => {
+        const g = await call('/api/stats/hit');
+        must(g.status === 405 && (g.headers.get('allow') || '').includes('POST'),
+          'GET hit → 405 + Allow: POST', g);
+        const p = await call('/api/stats/hit', { method: 'POST' });
+        must(p.status === 415 && p.body.error.code === 'UNSUPPORTED_MEDIA_TYPE',
+          '缺 content-type → 415 UNSUPPORTED_MEDIA_TYPE', p);
+        return '405 + Allow: POST；415 UNSUPPORTED_MEDIA_TYPE';
       });
   });
 

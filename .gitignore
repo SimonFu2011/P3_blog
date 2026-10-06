@@ -37,6 +37,9 @@ acl-report-*
 !.preview/verify-final.mjs
 !.preview/shot-entry.mjs
 
+# 站点外壳（收起侧边栏 / 访问统计 / 标签云）
+!.preview/verify-shell.mjs
+
 # 自建评论/登录系统的无浏览器冒烟（链表 DOM + 真 fetch + 契约形状 stub）
 # 这是本沙箱**唯一能跑的**验证手段：Chrome/Edge 会被 crashpad 拒绝，
 # 而这一组用 linkedom 提供的 DOM 把 js/auth-ui.js 与 js/comments.js 原样加载执行。

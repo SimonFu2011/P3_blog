@@ -66,6 +66,16 @@ const mkComments = () => ([
 let list = mkComments();
 let mode = { user: null, post: 'normal' };
 
+/* 访问统计（契约 §1.8）：底数刻意用非整数个位，断言里一眼就能看出
+   "显示的是后端数字"还是"退回了本机 localStorage"（后者是 1/1/1 那种小数字） */
+let hits = 0;
+const statsSnapshot = () => ({
+  total: 1234 + hits,
+  today: 56 + hits,
+  visitors: 789,
+  day: '2026-10-06'
+});
+
 const json = (res, status, body, extra) => {
   const buf = Buffer.from(JSON.stringify(body), 'utf8');
   res.writeHead(status, Object.assign({
@@ -156,6 +166,18 @@ const server = http.createServer(async (req, res) => {
     list = list.filter((c) => c.id !== id);
     return json(res, 200, { ok: true, deleted: id });
   }
+  /* ---- 访问统计（契约 §1.8 / §1.9）----
+     桩里的数字是可预期的：每次 hit 自增，方便断言"前端拿到的是后端数字、
+     而不是退回本机 localStorage"。 */
+  if (path === '/api/stats' && req.method === 'GET') {
+    return json(res, 200, { ok: true, stats: statsSnapshot() });
+  }
+  if (path === '/api/stats/hit' && req.method === 'POST') {
+    await readBody(req);
+    hits += 1;
+    return json(res, 200, { ok: true, stats: statsSnapshot() });
+  }
+
   if (path.startsWith('/api/')) return fail(res, 404, 'NOT_FOUND', '没有这个接口');
 
   let rel = decodeURIComponent(path);

@@ -225,9 +225,61 @@ CREATE TABLE IF NOT EXISTS `auth_log` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='认证审计日志表：只追加不修改，记录认证结果与来源 IP；user_id 不加外键以便长期保留痕迹';
 
+-- ----------------------------------------------------------------------------
+-- page_views：页面访问计数（首屏/内页那条"访问统计"的唯一数据来源）
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `page_views` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT
+    COMMENT '自增主键，追加顺序即访问顺序',
+  `day` DATE NOT NULL
+    COMMENT '站点时区（+08:00）下的日期，由应用算好写入。刻意不用 CURDATE()：库或容器时区一变，"今日访问量"就会在半夜跳错一天，而这一列是它唯一的判据',
+  `visitor` CHAR(32) NOT NULL
+    COMMENT '访客标识 = HMAC-SHA256(盐, IP|UA) 的前 32 位十六进制。**不存 IP、也不存 UA**：IPv4 空间可枚举，所以裸哈希等于存了 IP，必须用带随机盐的 HMAC；盐在 page_meta，只存在于本机库',
+  `path` VARCHAR(120) NOT NULL DEFAULT ''
+    COMMENT '被访问的路径（不含查询串），截断到 120、剔掉控制字符。统计本身不依赖它，只为日后能看"哪几篇受欢迎"',
+  `at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    COMMENT '入库时间（库会话 time_zone=+00:00，即 UTC）。只用于人与运维看，不参与"今日"判定',
+  PRIMARY KEY (`id`),
+  KEY `idx_page_views_day` (`day`),
+  KEY `idx_page_views_visitor` (`visitor`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='页面访问计数表：一行一次访问；访客标识是带盐 HMAC 的截断值，表里没有明文 IP';
+
+-- 两条索引各自服务一个查询，都不能省：
+--   idx_page_views_day     ：「今日访问量」是 day = ? 的等值/范围扫描，走它不必回表
+--   idx_page_views_visitor  ：COUNT(DISTINCT visitor)（总访客数）靠它做索引扫描；
+--                             没有它就是全表 + 临时表去重
+-- 规模假设（为什么要在这里写下来）：个人博客量级，十万行时 COUNT(DISTINCT) 仍是毫秒级，
+-- 所以本轮**不做**每日预聚合、也**不写**自动清理 —— "总访问量"一旦被清理就再也算不出来，
+-- 而它恰恰是业主最在意的那个数。真到百万行级再另建每日去重表 + 计数器，
+-- 那时也要保留本表：历史只能从这里重算。
+
+-- ----------------------------------------------------------------------------
+-- page_meta：杂项键值表（当前只放访问统计用的 HMAC 盐）
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `page_meta` (
+  `k` VARCHAR(40) NOT NULL
+    COMMENT '键名，例如 visitor_salt',
+  `v` VARCHAR(200) NOT NULL
+    COMMENT '值。当前只放 32 字节随机盐的十六进制表示（64 字符）',
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    COMMENT '最近修改时间，由 MySQL 自动维护',
+  PRIMARY KEY (`k`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='杂项键值表：放"必须留在库里、不能进仓库也不能进配置文件"的小状态（当前是访问统计的盐）';
+
+-- 为什么盐放在库里，而不是加一个配置文件 / 环境变量：
+--   ① 进配置就多一个部署件和一条"文件必须存在"的 fail-fast 分支，而这份盐丢失
+--      只影响"总访客数"（从那一刻重新计数），不值得为它增加启动约束；
+--   ② 绝不进仓库：一份盐配所有部署，哈希表就变成跨站可对照；
+--   ③ 它只在**首次写入访问记录时**惰性生成一次，之后常驻进程内存，
+--      不会变成"每个请求多读一次库"。
+-- 注意盐与 IP 是"一对"关系：轮换盐 = 之前的 visitor 值与之后的对不上，
+-- 总访客数会从轮换那一刻重新开始累积（page_views 明细不动）。
+
 -- ============================================================================
 -- 自检（人工排障时手动执行，非部署必需；这里只作注释保留，不参与建表）
---   SHOW TABLES;                       -- 应看到 6 张表
+--   SHOW TABLES;                       -- 应看到 8 张表
 --   SELECT table_name, engine, table_collation, table_comment
 --     FROM information_schema.tables WHERE table_schema='p3blog';
 --   SELECT table_name, constraint_name, referenced_table_name

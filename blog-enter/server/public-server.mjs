@@ -169,6 +169,10 @@ const createSkeletonStores = () => ({
   authThrottleFailure: async () => false,
   authThrottleSuccess: async () => false,
   authLog: async () => false,
+  /* 访问统计在骨架模式下也明确拒绝（与评论/用户同一口径）：
+     返回假数字会让"库没配好"看起来像"站点没人来"，是最难查的一类假象。 */
+  statsHit: async () => { throw dbDown('访问统计'); },
+  statsSummary: async () => { throw dbDown('访问统计'); },
   close: async () => {}
 });
 
@@ -596,6 +600,45 @@ export const buildRoutes = () => [
       ctx.log('info', '软删评论 id=' + id + ' by=' + ctx.user.id + (isAdmin && !isOwner ? ' (admin)' : ''));
       return { deleted: id };
     }
+  }),
+
+  /* ---------- POST /api/stats/hit ----------
+     访问统计：记一次访问，并把记完之后的汇总一起返回（前端一次请求拿到全部数字）。
+
+     【为什么是 POST，不是 GET】
+       GET 会被浏览器预取、被 CDN/中间层缓存、被爬虫与"链接预览"重放 ——
+       那样统计出来的就不是"人看过"，而且重放会凭空灌水。计数是写操作，
+       写操作走 POST；顺带吃到契约 §0.3 那条"写接口必须 application/json"，
+       跨站表单（不需要预检的那种）也因此发不进来。
+
+     【IP 从哪来，去了哪】
+       用 auditIpOf(ctx)：只有反代密钥校验通过时才采信 XFF 的最后一段
+       （nginx 亲自追加的 $remote_addr），否则用直连对端。明文 IP 只作为
+       参数交给数据层，在那里当场 HMAC 成访客标识，不落库、不写日志。
+
+     【限流】
+       每 IP 每分钟 30 次（契约 §0.6）：正常浏览（一分钟点开 30 个页面）够用，
+       脚本刷量会被挡住并拿到 429 + Retry-After。它不是安全闸，只是不让
+       "总访问量"被人为灌水。 */
+  route({
+    method: 'POST', path: '/api/stats/hit', auth: 'none',
+    handler: async (ctx) => {
+      ctx.rate.assert('stats.hit', 'ip:' + ctx.ip);
+      const stats = await ctx.services.statsHit({
+        ip: auditIpOf(ctx),
+        ua: ctx.ua,
+        path: ctx.pathname
+      });
+      return { stats };
+    }
+  }),
+
+  /* ---------- GET /api/stats ----------
+     只读汇总，**不计数**。给"看一眼数字"、排障与将来的后台看板用；
+     读接口不限流（契约 §0.6）。 */
+  route({
+    method: 'GET', path: '/api/stats', auth: 'none',
+    handler: async (ctx) => ({ stats: await ctx.services.statsSummary() })
   })
 ];
 

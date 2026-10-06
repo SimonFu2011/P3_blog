@@ -11,6 +11,12 @@
 <link rel="stylesheet" href="css/geo.css">
 <!-- 右上角登录入口（本轮新增）：样式复用 geo.css 的 --g-* 与 pages.css 的字体变量 -->
 <link rel="stylesheet" href="css/comments.css">
+<!-- 站点外壳（收起侧边栏 / 访问统计 / 标签云）—— 必须排在所有皮肤之后：
+     它是"同一个部件在所有页面长得一样"的唯一出处，靠后加载取胜。 -->
+<link rel="stylesheet" href="css/shell.css">
+<!-- 收起偏好要在首屏绘制之前写进 <html data-nav>，所以这个脚本**不能** defer
+     （原因见 js/shell.js 开头）；它只做一次 localStorage 读取，不碰 DOM。 -->
+<script src="js/shell.js"></script>
 </head>
 <body>
 
@@ -35,6 +41,8 @@
 <nav class="nav" id="nav" aria-label="站点导航">
   <div class="nav-bar">
     <a class="nav-brand" href="index.html">
+      <!-- 收起态只显示这一枚缩写（字由 js/shell.js 取站名首字写入） -->
+      <span class="nav-brand-mark" aria-hidden="true">S</span>
       <span class="nav-brand-name" data-site-name>SIMON 的个人站</span>
       <span class="nav-brand-tag" data-site-sub>PERSONAL SITE</span>
     </a>
@@ -43,16 +51,27 @@
       <span class="nt-text-closed">MENU</span>
       <span class="nt-text-open">CLOSE</span>
     </button>
+    <!-- 桌面端收起/展开（与上面的 MENU 是两件事）：只改侧边栏宽度，
+         展开是完整文字菜单、收起是 76px 图标栏，偏好写 localStorage。
+         ≤980px 由 shell.css 隐藏，那一档交给 MENU 抽屉。 -->
+    <button class="nav-rail" type="button" data-nav-collapse aria-expanded="true"
+            aria-controls="nav" aria-label="收起侧边栏" title="收起侧边栏">
+      <svg class="nr-ic" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+        <rect x="2.6" y="3.6" width="14.8" height="12.8" rx="1.4"/>
+        <path d="M8.2 3.6v12.8"/>
+        <path class="nr-arrow" d="M12.9 8.1 10.9 10l2 1.9"/>
+      </svg>
+    </button>
   </div>
 
   <ul class="nav-list" id="navList">
-    <li><a class="nav-link" href="about.html" aria-current="page"><span class="nl-en">ABOUT</span><span class="nl-cn">关于我</span></a></li>
-    <li><a class="nav-link" href="archive.html"><span class="nl-en">ARTICLES</span><span class="nl-cn">博客文章</span></a></li>
-    <li><a class="nav-link is-todo" href="index.html" data-todo="待定"><span class="nl-en">TBD</span><span class="nl-cn">待定</span></a></li>
+    <li><a class="nav-link" href="about.html" aria-current="page"><span class="nl-ic" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="8.6" r="3.6"/><path d="M4.8 19.6c.7-3.6 3.6-5.4 7.2-5.4s6.5 1.8 7.2 5.4"/></svg></span><span class="nl-en">ABOUT</span><span class="nl-cn">关于我</span></a></li>
+    <li><a class="nav-link" href="archive.html"><span class="nl-ic" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="3.6" y="4.6" width="16.8" height="14.8"/><path d="M7.2 9.4h9.6M7.2 12.6h9.6M7.2 15.8h5.6"/></svg></span><span class="nl-en">ARTICLES</span><span class="nl-cn">博客文章</span></a></li>
+    <li><a class="nav-link is-todo" href="index.html" data-todo="待定"><span class="nl-ic" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="4.2" y="4.2" width="15.6" height="15.6" stroke-dasharray="3.2 3.2"/><circle cx="12" cy="12" r="1.6"/></svg></span><span class="nl-en">TBD</span><span class="nl-cn">待定</span></a></li>
   </ul>
 
   <div class="nav-foot">
-    <a class="nav-back" href="index.html">BACK TO ENTRY</a>
+    <a class="nav-back" href="index.html" data-tip="回到入口页"><span class="nb-arrow" aria-hidden="true">←</span><span class="nb-text">BACK TO ENTRY</span></a>
     <span data-year>© 2026 SIMON 的个人站</span>
   </div>
 </nav>
@@ -200,7 +219,11 @@
 
       <div class="section-body">
         <div class="contact-list">
-          <a class="contact" href="mailto:hhh68682011@outlook.com"
+          <!-- 注意这一行的结尾必须是 ">"（本轮修的缺陷）：
+               以前这里漏了尖括号的收尾，浏览器就把后面那三个 <span> 连同
+               图标和邮箱一起当成了 <a> 的属性 —— 于是邮箱那一行整行空白，
+               只剩下一条发丝线，看着像"排版错位"。 -->
+          <a class="contact" href="mailto:hhh68682011@outlook.com">
             <span class="contact-num" aria-hidden="true">01</span>
             <span class="contact-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" focusable="false"><path d="M2 5.5A2.5 2.5 0 0 1 4.5 3h15A2.5 2.5 0 0 1 22 5.5v13A2.5 2.5 0 0 1 19.5 21h-15A2.5 2.5 0 0 1 2 18.5v-13Zm2.2-.5 7.8 6.1L19.8 5H4.2ZM20 6.6l-7.4 5.8a1 1 0 0 1-1.2 0L4 6.6v11.9c0 .3.2.5.5.5h15c.3 0 .5-.2.5-.5V6.6Z"/></svg>

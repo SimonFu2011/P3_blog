@@ -41,7 +41,14 @@ ws.onmessage = (e) => {
   if (m.id && pending.has(m.id)) { const { res, rej } = pending.get(m.id); pending.delete(m.id); m.error ? rej(new Error(JSON.stringify(m.error))) : res(m.result); return; }
   if (m.method === 'Runtime.exceptionThrown') events.push('[exception] ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
   if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') events.push('[console.error] ' + m.params.args.map((a) => a.value ?? a.description).join(' '));
-  if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') events.push('[log] ' + m.params.entry.text);
+  if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') {
+    /* 同 verify-geo / verify-pages / verify-shell：静态预览没有 /api，
+       /api/auth/me（探会话）与 /api/stats/hit（访问统计计数）的 404 是预期内的 */
+    const u = m.params.entry.url || '';
+    if (!(/\/api\/(auth\/me|stats\/hit)\b/.test(u) && /404/.test(m.params.entry.text))) {
+      events.push('[log] ' + m.params.entry.text + (u ? ' @ ' + u : ''));
+    }
+  }
 };
 const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
 const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
@@ -118,15 +125,26 @@ console.log('\n== 静态资源与站内链接 ==');
   const missingImg = Array.from(imgs).filter((u) => !existsSync(join(ROOT, u)));
   ok('文章正文引用的配图都存在（共 ' + imgs.size + ' 张）', missingImg.length === 0, missingImg);
 
-  /* 样式表之间不该有"已废弃"的联动：geo.css 只被两页引用 */
+  /* 样式表之间不该有"已废弃"的联动：geo.css 只被两页引用。
+     判据只看 <link href>，**不看全文本** —— 注释里提到 "geo.css" 不算引用
+     （本文件这一条曾经被 404.html 注释里的字样带偏过一次）。 */
+  const cssLinks = (html) => [...html.matchAll(/<link[^>]+href="(css\/[^"]+\.css)"/g)].map((m) => m[1]);
   const about = readFileSync(join(ROOT, 'about.html'), 'utf8');
   const archive = readFileSync(join(ROOT, 'archive.html'), 'utf8');
   const article = readFileSync(join(ROOT, 'article.html'), 'utf8');
   const e404 = readFileSync(join(ROOT, '404.html'), 'utf8');
+  const has = (html, f) => cssLinks(html).some((h) => h.endsWith(f));
   ok('about/archive 走"pages + geo"两层皮肤',
-    /pages\.css/.test(about) && /geo\.css/.test(about) && /pages\.css/.test(archive) && /geo\.css/.test(archive));
-  ok('article/404 保持深水底（不引 geo.css）',
-    /pages\.css/.test(article) && !/geo\.css/.test(article) && /pages\.css/.test(e404) && !/geo\.css/.test(e404));
+    has(about, 'pages.css') && has(about, 'geo.css') && has(archive, 'pages.css') && has(archive, 'geo.css'));
+  /* 【这条断言在 2026-10 被改正过】原来写的是"article/404 都保持深水底（不引 geo.css）"，
+     但文章详情页早在换肤那一轮就改成纯白皮肤了（README 的皮肤表 + article.html 自己的
+     注释都写着 pages → geo → prose-light），所以它**从那时起就一直红着** ——
+     拿 HEAD 的干净站点跑同样是 FAIL。皮肤分工的真实判据是下面这条：
+     404 仍是深水底（只有 pages.css），文章页是纯白皮肤（pages + geo + prose-light）。 */
+  ok('皮肤分工：404 仍是深水底，文章页是纯白皮肤（pages + geo + prose-light）',
+    has(e404, 'pages.css') && !has(e404, 'geo.css') && !has(e404, 'prose-light.css') &&
+    has(article, 'pages.css') && has(article, 'geo.css') && has(article, 'prose-light.css'),
+    JSON.stringify({ e404: cssLinks(e404), article: cssLinks(article) }));
 
   /* 五个页面都必须显式声明编码，避免中文乱码 */
   const noCharset = pages.filter((p) => !/<meta charset="utf-8">/i.test(readFileSync(join(ROOT, p), 'utf8')));

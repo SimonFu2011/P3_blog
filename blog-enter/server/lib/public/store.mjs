@@ -23,6 +23,7 @@ import {
 import { hashPassword } from './passwords.mjs';
 import * as users from './userstore.mjs';
 import * as comments from './commentstore.mjs';
+import * as stats from './statsstore.mjs';
 
 export { missingDbEnv, readDbConfig, safeDbSummary, DEFAULT_CONNECTION_LIMIT, DEFAULT_SESSION_MAX_AGE_DAYS };
 
@@ -137,6 +138,12 @@ export const createStores = async (opts = {}) => {
     authThrottleFailure: (ip, action, policy) => users.noteThrottleFailure(pool, ip, action, policy),
     authThrottleSuccess: (ip, action) => users.clearThrottle(pool, ip, action),
     authLog: (entry) => users.writeAuthLog(pool, entry),
+
+    /* ---------- 访问统计 ----------
+       注意入参只有 ip/ua/path：明文 IP 只作为**函数参数**往下一层走一次，
+       statsstore 内部立刻把它 HMAC 成访客标识，库里、日志里都不会有它。 */
+    statsHit: (info) => stats.recordHit(pool, info),
+    statsSummary: () => stats.summary(pool),
 
     /** 优雅退出：停掉定时器并关闭连接池（否则 systemd stop 会等到超时才杀） */
     async close() {
