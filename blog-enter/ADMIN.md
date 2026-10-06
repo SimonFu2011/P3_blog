@@ -145,3 +145,88 @@ node blog-enter/server/dev-server.mjs --set-pass --pass "一串只有你知道�
 | `blog-enter/admin/` | 管理页 UI（随仓库走；不被任何公开页面引用） |
 | `blog-enter/server/tests/` | 48 项验签 + 浏览器段脚本 |
 | `.admin/` | 运行时数据：会话、口令哈希、备份、回收站（**已 gitignore**） |
+
+---
+
+## 8. 评论区（Waline，**在另一个后台管**）
+
+文章页底部的评论区是 **Waline**（自建，不是第三方托管）。它和后台上面的这套
+文章管理**完全是两个系统**，各有各的登录、各有各的数据库。
+
+| | 文章管理（本文档 1–7 节） | 评论 |
+| --- | --- | --- |
+| 入口 | 本地 `node dev-server.mjs` → `/_admin/`；线上走 SSH 隧道 | `http://43.108.100.116/comments/`（文章页里可见） |
+| 后台 | `/_admin/`（口令 + 会话 cookie） | `/comments/ui/`（邮箱 + 密码），**只允许服务器本机访问** |
+| 数据 | `blog-enter/js/posts.js`（在仓库里） | `/srv/waline/data/waline.sqlite`（**不在仓库里**） |
+| 程序 | `blog-enter/server/` | `/srv/waline/app`（`@waline/vercel`，systemd `p3-waline`） |
+
+### 8.1 进评论后台
+
+管理面**没有**对公网开放（nginx 里 `/comments/ui/` 只 allow 127.0.0.1）。走隧道：
+
+```powershell
+ssh -L 8360:127.0.0.1:8360 root@43.108.100.116
+# 然后浏览器打开 http://127.0.0.1:8360/ui/
+```
+
+### 8.2 第一个注册的账号就是管理员
+
+Waline 的约定：**第一个注册的用户自动成为管理员**。所以顺序是死的：
+
+1. 先用隧道打开 `/ui/` 注册（这一步**不能拖到对公网开放之后**）；
+2. 确认自己是管理员；
+3. 才谈得上开放注册。
+
+在那之前，nginx 里有一段**临时**规则把 `POST/GET /comments/api/user` 也锁在回环
+（伪静态里的 `location = /comments/api/user`）。**管理员注册完、要开放注册时，
+必须删掉那一段**，否则评论者永远注册不了。仓库里对应的模板是同名那段，
+见 `deploy/bt/nginx-locations.conf`。
+
+### 8.3 评论策略在两处，必须一致
+
+| 在哪 | 变量 | 现在 | 说明 |
+| --- | --- | --- | --- |
+| 服务器 `/etc/p3blog/waline.env` | `LOGIN` | `disable` | `force` = 必须登录/验证后才能评论 |
+| `article.html` 底部的模块脚本 | `login` | `disable` | 客户端选项，**必须与服务端一致** |
+
+`COMMENT_AUDIT=true`：新评论先审后发。作者自己看得到并带"审核中"提示，
+别人看不到。审核在 `/comments/ui/`。
+
+邮箱验证码**不是开关**：`waline.env` 里一旦填好 `SMTP_*`，注册与评论就自动要求
+验证码。顺序不能反 —— **先验通发信，再把 `LOGIN` 改成 `force`**，否则发不出信
+等于谁也评论不了。
+
+### 8.4 评论是按 URL 绑的
+
+Waline 用 `path` 把评论绑到文章地址上，本站写死成 `/article.html?slug=<slug>`
+（在 `article.html` 里）。所以**改 slug 之后，评论不会跟着走** —— 旧评论留在旧
+path 上，要么在 `/comments/ui/` 里手工改它，要么接受"改名 = 评论清零"。
+
+### 8.5 客户端资源是自托管的
+
+`waline.js` / `waline.css` / `waline-admin.js` 三个文件放在 `blog-enter/comments/`，
+随站点一起发布（版本、来源、升级方法见该目录的 `README.md`）。**不走 unpkg**：
+它挂了的话评论区是运行时一片空白，本地根本测不出来。
+
+### 8.6 验证
+
+```powershell
+# 不依赖浏览器的 74 项（含页面逻辑、接口、沙箱）
+node blog-enter/server/tests/run-all.mjs
+
+# 真浏览器：面板有没有渲染出来、不存在的 slug 会不会偷偷拉评论、有没有外部请求
+node blog-enter/server/tests/verify-comments-live.mjs
+```
+
+人工那一条（发一条真评论）在 `deploy/DEPLOY-RECORD.md` 的评论区一节。
+
+### 8.7 回滚
+
+```bash
+sudo systemctl disable --now p3-waline          # 关评论服务
+# 伪静态恢复成加评论区之前那份（备份在 /root/p3-conf-backups/）
+/www/server/nginx/sbin/nginx -t && /www/server/nginx/sbin/nginx -s reload
+```
+
+前端退回占位状态就用 `git revert` 撤掉接评论那次提交。**评论数据在
+`/srv/waline/data/waline.sqlite`，别删** —— 将来还能再拉起来。

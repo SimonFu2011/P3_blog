@@ -12,8 +12,10 @@
 | 站点 | `http://43.108.100.116/` 正常，全部页面与资源 200 |
 | 站点根目录 | `/www/wwwroot/43.108.100.116`（`www:www`，目录 2775 setgid） |
 | 仓库 | `/srv/blog/repo`，`blog:blog`，与 GitHub `main` **一致** |
-| 代码版本 | commit `2639a52`（本机 / 服务器 / GitHub 三方一致） |
+| 代码版本 | commit `add8ed2`（本机 / 服务器 / GitHub 三方一致） |
 | 后台服务 | `p3-admin.service`，`active`，**只监听 `127.0.0.1:8848`** |
+| 评论服务 | `p3-waline.service`，`active`，**只监听 `127.0.0.1:8360`**；数据在 `/srv/waline/data/waline.sqlite`（仓库外）；客户端资源自托管在站点 `/comments/` |
+| 评论策略 | 现在是「匿名可评 + 先审后发」（`LOGIN=disable` + `COMMENT_AUDIT=true`）。**邮箱验证码还没开** —— 见第 8 节 |
 | 认证 | 口令（PBKDF2-SHA256 210k）＋ 每客户端会话 cookie ＋ UA/IP 网段绑定 |
 | 反代 | **未开启**。nginx 里 `/_admin/` 仍是 `return 404` |
 | 公网暴露面 | `22` 开、`80` 开、`443` 关、**`8848` 不可达**；<br>`8888`（宝塔面板）在 **iptables 层限制为「本机 + 白名单 IP」** |
@@ -163,8 +165,8 @@ sudo -u blog git -C /srv/blog/repo log --oneline -5
 
 | 项 | 状态 |
 | --- | --- |
-| Waline 评论区 | **方案已写（`PLAN-COMMENTS-WALINE.md`），服务器上一行都没部署** |
-| 服务器回推 GitHub | 服务器**没有**写凭据，所以它在管理页保存后产生的 commit 只在本地。<br>当前靠"本机 push + 服务器 ff-only 拉取"同步；需要"服务器是唯一写入方"时<br>再给它配一把带写权限的 Deploy Key（`PLAN-ADMIN-LIVE.md` §9.1） |
+| Waline 评论区 | **已上线**（2026-10-06）：服务端 + nginx + 前端都跑起来了，见第 8 节。<br>**还没做**：① 管理员账号还没注册（第一个注册的自动是管理员）；<br>② SMTP 授权码没填，所以邮箱验证码还没开；③ 开完要删掉伪静态里那段临时的注册封锁 |
+| 服务器回推 GitHub | **现在能推了**（2026-10-06 实测：管理页保存产生的内容提交会自动推到 `origin/main`，来源是服务器上的内容提交 `a371843`）。<br>`blog` 用户下有一把 `~/.ssh/github_deploy`；本机与服务器并行提交时要注意先 rebase 再推 |
 | `images.mjs` 的 SVG `<style>` 文本未净化 | 未修（ReDoS 只修了 `validate.mjs`） |
 | 图片像素上限 / 登录并发上限 / `/api/session` 性能 | 未修，见 `AUDIT-INDEX.md` |
 | 前端渲染期转义（审计 F5/F6/F7） | 现在只靠保存期白名单挡 |
@@ -208,3 +210,83 @@ sudo -u blog git -C /srv/blog/repo log --oneline -5
    等于没有保护。现在发布脚本遇到草稿直接拒绝发布（exit 4）。
 7. **`images.mjs` 的 `style` 是允许标签**，而标签之间的文本不过滤；
    另外 `validate.mjs` 原来的标签正则有 ReDoS（43 字节 → 1288ms），已改线性分词器。
+
+---
+
+## 8. 评论区（Waline）—— 2026-10-06 实测
+
+方案是 `PLAN-COMMENTS-WALINE.md`（方案 E）。**它写的顺序基本对，但有三处是错的**，
+下面按实测补上。装法已经沉淀成脚本：`bash deploy/bin/install-waline.sh`（幂等）。
+
+### 8.1 现在长什么样
+
+```
+浏览器 ──► nginx 43.108.100.116:80
+             ├─ /comments/api/…  ──► 127.0.0.1:8360  Waline（p3-waline.service）
+             ├─ /comments/ui/    ──► 只 allow 127.0.0.1；管理后台走 SSH 隧道
+             ├─ /comments/waline*.js|css ──► 静态文件（站点自己那份，自托管）
+             └─ 其余 ──► 静态站点，完全不受影响
+```
+
+| 项 | 值 |
+| --- | --- |
+| 服务端 | `@waline/vercel` **1.43.4**，`/srv/waline/app`，systemd `p3-waline` |
+| 客户端 | `@waline/client` **3.16.0**（自托管在 `blog-enter/comments/`） |
+| 后台 UI | `@waline/admin` **0.36.0**（同上，路径写在 `WALINE_ADMIN_MODULE_ASSET_URL`） |
+| 数据库 | `/srv/waline/data/waline.sqlite`（**仓库外**，`blog:blog` 640） |
+| 配置 | `/etc/p3blog/waline.env`（640 root:blog，含 `JWT_TOKEN`） |
+| 当前策略 | `LOGIN=disable`（匿名可评）+ `COMMENT_AUDIT=true`（先审后发）+ `IPQPS=60` |
+
+### 8.2 方案 E 里三处与实测不符的地方（照抄会踩）
+
+1. **SQLite 必须先放官方结构文件。** 空库不会自建表 —— 读写一律
+   `{"errno":500,"errmsg":"no such table: wl_Comment"}`。官方文档
+   「多数据库服务支持 · SQLite」要求先下载
+   `assets/waline.sqlite`。安装脚本会从三个源里挑一个能用的下下来，
+   并**校验里面确实有 `CREATE TABLE "wl_Comment"`** 才安装。
+2. **Waline 默认监听 `0.0.0.0`。** 实测 `ss -lntp` 是 `*:8360`，
+   等于绕过 nginx 裸奔（限流、日志、`/ui/` 的 IP 限制全部失效）。
+   修法：在 `vanilla.js` 旁边放 `config.js` 导出 `{ host: '127.0.0.1' }`
+   （`vanilla.js` 在 `run()` 之后会 `require('./config.js')` 逐项 `think.config`）。
+   安装脚本会写这个文件；**重装 `@waline/vercel` 会删掉它，装完要重跑脚本**。
+3. **`proxy_pass` 结尾必须带 `/api/`。** 方案 E 写的是
+   `proxy_pass http://127.0.0.1:8360;`（不带 URI）—— 那样
+   `/comments/api/comment` 会原样转发上去，Waline 的接口前缀是 `/api/`，
+   结果是 404。带 URI 才会把 `/comments` 前缀剥掉。
+   同一段里 `X-Forwarded-For` 用 `$remote_addr` **覆盖**而不是 append：
+   thinkjs 开了 `proxy=true`，append 的话攻击者自带 XFF 就能伪造 IP 绕过 IPQPS。
+
+另外一条方案没提、真浏览器才发现的：**客户端默认会去 unpkg 拉表情包**
+（`https://unpkg.com/@waline/emojis@1.1.0/...`）。本站零外部运行时依赖，
+所以 `init` 里写的是 `emoji: false`；要开就得把表情包也自托管。
+
+### 8.3 验收（都跑过）
+
+```bash
+# 路由没被抢 / 站点没受影响
+for u in / /index.html /archive.html /article.html /about.html /404.html /js/posts.js; do
+  printf '%-16s %s\n' "$u" "$(curl -s -o /dev/null -w '%{http_code}' http://43.108.100.116$u)"; done   # 全 200
+curl -s -o /dev/null -w '%{http_code}\n' http://43.108.100.116/_admin/       # 404（管理面没被带出去）
+curl -s -o /dev/null -w '%{http_code}\n' http://43.108.100.116/comments/ui/  # 403（只允许本机）
+curl -s -H 'Referer: http://43.108.100.116/article.html' \
+     'http://43.108.100.116/comments/api/comment?path=/article.html' | head -c 120   # JSON，不是 404
+ss -lntp | grep 8360        # 必须 127.0.0.1:8360
+```
+
+```powershell
+node blog-enter/server/tests/verify-comments-live.mjs   # 真浏览器 15 项全绿
+```
+
+端到端发一条：真浏览器在文章页填昵称邮箱 → 提交 → 页面出现"评论正在审核中
+（当前仅自己可见）"，接口 200，`wl_Comment` 里 `status=waiting`，
+region 正确（说明 XFF 传对了）。这条测试评论已从库里删掉。
+
+### 8.4 还没做的（下一步）
+
+| 序 | 做什么 | 卡点 |
+| --- | --- | --- |
+| 1 | **注册管理员**：`ssh -L 8360:127.0.0.1:8360 root@43.108.100.116` → `http://127.0.0.1:8360/ui/` | 第一个注册的自动是管理员，**绝不能拖到开放注册之后** |
+| 2 | 填 `SMTP_*`（QQ/163 授权码）→ `systemctl restart p3-waline` → 验证码能发出来 | 发不出信 = 谁也评论不了，所以顺序不能反 |
+| 3 | 把 `LOGIN` 改成 `force`，同步改 `article.html` 里的 `login` | 两处必须一致 |
+| 4 | 删掉伪静态里那段**临时**的 `location = /comments/api/user`（现在是它挡着公网注册） | 不删 = 评论者永远注册不了 |
+

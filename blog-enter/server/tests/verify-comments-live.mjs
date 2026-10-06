@@ -118,6 +118,10 @@ const S = (m, p) => send(m, p, sessionId);
 await S('Page.enable');
 await S('Runtime.enable');
 await S('Network.enable');
+/* 关掉 HTTP 缓存：站点给 js/css 设了 5 分钟 expires，而本脚本用的是**固定**的
+   Chrome profile（.preview/cp-comments-verify）。不关缓存的话，第二次跑会拿着
+   上一轮的旧 CSS 去判，结论正好相反 —— 这个假故障真的发生过一次。 */
+await S('Network.setCacheDisabled', { cacheDisabled: true });
 await S('Log.enable').catch(() => {});
 await S('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 

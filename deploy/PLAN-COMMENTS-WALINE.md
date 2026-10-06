@@ -1,5 +1,29 @@
 # 方案 E：评论区（Waline 自建 + 邮箱验证）
 
+> ## ✅ 执行状态（2026-10-06）：**已上线，但只走完了前半程**
+>
+> 服务端、nginx、前端都跑起来了，实际部署记录见 `DEPLOY-RECORD.md` 第 8 节，
+> 安装脚本是 `deploy/bin/install-waline.sh`（幂等）。
+>
+> **当前是「匿名可评 + 先审后发」**（`LOGIN=disable`），
+> 本方案选的「邮箱验证码」还**没开** —— 它要等 SMTP 授权码。
+>
+> **本文件下面有三处是错的/漏的，照抄会踩**（细节见 `DEPLOY-RECORD.md` §8.2）：
+>
+> 1. **§4 漏了一步**：SQLite 必须先放官方 `assets/waline.sqlite` 结构文件，
+>    空库**不会**自建表 —— 读写全是 `no such table: wl_Comment`。
+> 2. **§4.4 只提醒没解决**：Waline 默认监听 `0.0.0.0`，实测确实是 `*:8360`。
+>    光看 `ss` 不够，得在 `vanilla.js` 旁边放 `config.js` 把 host 钉成回环。
+> 3. **§6.1 的 `proxy_pass` 写错了**：结尾少了 `/api/`，会把
+>    `/comments/api/comment` 原样转上去 → 404（Waline 的接口前缀是 `/api/`）。
+>    另外那里应该用 `X-Forwarded-For $remote_addr` **覆盖**，而不是 append。
+>
+> 还有一条本方案没预见到、真浏览器跑出来才发现的：**客户端默认会去 unpkg
+> 拉表情包**（`@waline/emojis`），所以 `init` 里要写 `emoji: false`
+> （或把表情包也自托管）。
+>
+> 建议做法：**别照着下面的文件重头做一遍**，看 `DEPLOY-RECORD.md` §8 + 安装脚本。
+
 > **自包含。** 前提是 `deploy/PLAN-ADMIN-LIVE.md`（方案 D）已经在跑：服务器上有 Node、
 > nginx 反代 `/api/` 到 `127.0.0.1:8848`。评论系统**独立**于那套后台，但共用同一套 nginx。
 >
@@ -113,6 +137,16 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1/api/session     # 期�
 sudo install -d -m 750 -o blog -g blog /srv/waline/data
 ```
 
+> ⚠️ **【方案漏掉的一步】SQLite 必须先放官方结构文件。**
+> Waline 的 SQLite **不会自己建表**：数据库文件是空的（0 字节或只有文件头），
+> 任何读写都返回 `{"errno":500,"errno":..., "no such table: wl_Comment"}`。
+> 官方文档「多数据库服务支持 · SQLite」明确要求先下载
+> [`assets/waline.sqlite`](https://github.com/walinejs/waline/blob/main/assets/waline.sqlite)
+> 放到 `$SQLITE_PATH/waline.sqlite`。实测：24KB，里面是 `wl_Comment` /
+> `wl_Counter` / `wl_Users` 三张表的建表语句。
+> 装之前**校验一下内容**（`strings waline.sqlite | grep 'CREATE TABLE "wl_Comment"'`），
+> 免得把一个失败的下载当成功。
+
 数据目录**必须放在 `/srv/blog/repo` 之外**。理由：`blog-publish.sh` 里是
 `rsync --delete`，而它同步的是 `blog-enter/`；`.admin/` 就吃过这个亏
 （见 `blog-publish.sh` 第 40–44 行的注释）。SQLite 文件放仓库里，迟早被
@@ -221,6 +255,17 @@ Docker 那行 `127.0.0.1:8360:8360` 已经限住了。方式 B 要确认：
 ss -lntp | grep 8360     # 期望 127.0.0.1:8360；若是 0.0.0.0:8360，Waline 就绕过 nginx 裸奔了
 ```
 
+> ⚠️ **【实测：这里光"注意"是不够的】** 方式 B 下默认就是 `*:8360`（thinkjs
+> 默认 `host` 为空 = 监听所有网卡）。光看一眼 `ss` 不会让它变成回环，得真去改：
+> 在 `vanilla.js` 旁边放一个 `config.js`，导出 `{ host: '127.0.0.1', port: 8360 }` ——
+> `vanilla.js` 在 `instance.run()` 之后会 `require('./config.js')` 并逐项
+> `think.config(k, v)`（`run()` 里起服务是异步的，所以这个顺序来得及生效）。
+>
+> ⚠️ 这个文件放在 `node_modules/` 里，**重新 `npm install` 会把它删掉** ——
+> 装完要重跑 `deploy/bin/install-waline.sh`，或者把这件事记进自己的部署清单。
+>
+> 顺带：确认云安全组/面板防火墙里 **8360 从未被放行**。它只该被 nginx 从本机访问。
+
 ---
 
 ## 5. 阶段 2：先把"发信"验通，再接前端
@@ -278,18 +323,31 @@ cp -a /www/server/panel/vhost/rewrite/<站点>.conf{,.bak-comments-$(date +%F)}
 
 ```nginx
 # ---- Waline 评论服务：挂在 /comments/ 下，接口自然是 /comments/api/ ----
-location ^~ /comments/ {
-    proxy_pass http://127.0.0.1:8360;
+# ⚠️ proxy_pass 结尾的 /api/ **不能省**（本方案原文写的就是省掉的那版，实测 404）：
+#    Waline 的接口前缀是 /api/。带 URI 时 nginx 才会用 /api/ 替换掉匹配到的
+#    /comments/api/ 前缀；不带 URI 就把 /comments/api/comment 原样转上去，
+#    Waline 那边找不到 → 404。
+# ⚠️ X-Forwarded-For 用 $remote_addr 覆盖，不要用 $proxy_add_x_forwarded_for：
+#    thinkjs 开了 proxy=true，会取 XFF 当客户端 IP。append 的话攻击者自带一个
+#    XFF 就能伪造 IP，把 Waline 的 IPQPS 限流整条绕过去。
+location ^~ /comments/api/ {
+    proxy_pass http://127.0.0.1:8360/api/;
     proxy_http_version 1.1;
     proxy_set_header Host              $host;
     proxy_set_header X-Real-IP         $remote_addr;
-    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-For   $remote_addr;
     proxy_set_header X-Forwarded-Proto $scheme;
     # 评论提交与验证码的请求体很小，但别用默认 1m 卡住长评论
     client_max_body_size 1m;
     proxy_read_timeout 60s;
 }
 ```
+
+> **还有一条本方案没想到的**：客户端的 `waline.js` / `waline.css` 是自托管在
+> **站点里的**（`blog-enter/comments/`），所以这里只能反代 `/comments/api/` 与
+> `/comments/ui/`，**绝不能整段 `^~ /comments/`** —— 整段反代会把那两个静态文件
+> 也送给 Waline，结果 404。完整的、实际在用的那段规则见
+> `deploy/bt/nginx-locations.conf` 的 `P3_comments` 段。
 
 **不要**在这个 location 里写 `add_header`。同一个 server 块里已经有三条安全头
 （nosniff / X-Frame-Options / Referrer-Policy），nginx 的 `add_header` **不继承**：
@@ -425,6 +483,11 @@ blog-enter/comments/waline.css
   }
 </script>
 ```
+
+> **实测补一条**：这段 `init` 里还要加 `emoji: false`。Waline 客户端的表情选项卡
+> 默认去 `https://unpkg.com/@waline/emojis@1.1.0/...` 拉数据 —— 真浏览器跑
+> `verify-comments-live.mjs` 时，网络面板里就有这条外部请求。与"本站零外部运行时
+> 依赖"冲突，所以关掉了；要开就把表情包一起自托管（见 `blog-enter/comments/README.md`）。
 
 > 用 `<script type="module">` 的好处：它自带 `defer` 语义，且顶层 `await import()`
 > 可用。自托管路径是 `comments/waline.js`（相对本文档）；若改用 CDN，就把路径换成
