@@ -320,7 +320,13 @@ region 正确（说明 XFF 传对了）。这条测试评论已从库里删掉�
 
 ---
 
-## 9. 公开登录与 MySQL —— 2026-10-06 骨架（实测结果待 t18 填）
+## 9. 公开登录与 MySQL —— 2026-10-06 已上线（t26 线上部署与真实站点验收）
+
+> 本节由 **t26（集成）** 于 2026-10-06 18:16–18:21 CST 在 `root@43.108.100.116` 落地后逐条实测填写。
+> 凡写"实测"的行，都是**当场跑出来并把命令与原始输出贴在行内**的；没有实测的一律显式写"未实测"，
+> 不写成"通过"。本轮**唯一未通过**的判据是 §9.8 的 B-32（公网打未知 `/api/*` 路径回 nginx 的 404
+> 而不是契约的 JSON 404）：它是**非阻塞**（8 条对外端点无一受影响）但**不隐瞒**的失败项，见 §9.8.5。
+> 另外 §9.11 记录了本轮踩到的 4 个**环境/工具缺陷**（都不是产品代码问题），供后续复跑时避坑。
 
 新系统：`p3-public`（只绑回环 `127.0.0.1:8850`）+ MySQL 库 `p3blog`，经 nginx 的
 `/api/auth/*` 与 `/api/comments*` 反代段对外；页面评论从 Waline 换成自建组件（MySQL 存储）。
@@ -328,35 +334,61 @@ region 正确（说明 XFF 传对了）。这条测试评论已从库里删掉�
 表结构见 `blog-enter/server/sql/schema.sql`，接口形状见
 `blog-enter/server/CONTRACT-public-api.md`。
 
-### 9.1 现状（t18 逐项填实测）
+### 9.1 现状（t26 逐项实测，2026-10-06 18:20 CST）
 
 | 项 | 期望 | 实测 |
 | --- | --- | --- |
-| `systemctl is-active p3-public` / `is-enabled` | active / enabled | TODO |
-| `ss -ltnp \| grep 8850` | 只有 `127.0.0.1:8850` | TODO |
-| `mysql --defaults-file=/etc/my.cnf -N -e "select count(*) from information_schema.tables where table_schema='p3blog'"` | 6 | TODO |
-| 公网 `GET /api/auth/me` | 200 + `{"ok":true,"user":null,"db":"up",…}` | TODO |
-| 公网 `/_admin/`、`/server/`、`/*.mjs` | 全 404 | TODO |
-| 首页右上角登录入口；article.html 无 Waline | 是 / 是 | TODO |
-| 注册→登录→发评论→删除→登出 | 闭环全通 | TODO |
-| 越权（A 删 B 的评论） | 403 且评论仍在 | TODO |
-| 限流（错误口令连打） | 第 11 次 429 + `Retry-After` | TODO |
-| 响应体不含 `password_hash`/`email`/`user_id` | 是 | TODO |
-| **直连 8850 不带/伪造密钥头**（冒充 nginx） | 必须 403；而经公网同一请求 200 | TODO |
-| **给了 `--proxy-secret-file` 但密钥文件缺失/为空** | 服务**启动失败**（fail-fast，journal 有明确原因），不是静默降级 | TODO |
-| 代理密钥文件 | `/etc/p3blog/public-proxy-secret` 640 root:blog、`/etc/p3blog/public-proxy-header.conf` 600 root:root，两者同值 64 位十六进制 | TODO |
+| `systemctl is-active p3-public` / `is-enabled` | active / enabled | **active / enabled**（`is-active=active`、`is-enabled=enabled`） |
+| `ss -ltnp \| grep 8850` | 只有 `127.0.0.1:8850` | **`LISTEN 0 511 127.0.0.1:8850 … node pid=40156`**，无 `0.0.0.0:8850`、无 `[::]:8850` |
+| `mysql --defaults-file=/etc/my.cnf -N -e "select count(*) from information_schema.tables where table_schema='p3blog'"` | 6 | **6**（`tables=6`；`users/comments/sessions` 验收清理后均为 0） |
+| 公网 `GET /api/auth/me` | 200 + `{"ok":true,"user":null,"db":"up",…}` | **200** + `{"ok":true,"user":null,"db":"up","session_max_age_days":30}` |
+| 公网 `/_admin/`、`/server/`、`/*.mjs` | 全 404 | 全 **404**（另测 `/package.json` 404、`/server/public-server.mjs` 404、`/evil.mjs` 404、`/api/auth/xyz` 404、`/api/comments/abc` 404） |
+| 首页右上角登录入口；article.html 无 Waline | 是 / 是 | **是 / 是**：五页 `data-auth-entry=1`、`auth-ui.js≥1`；`article.html` 的 `waline` 计数 **0**、`comments.js` 计数 4 |
+| 注册→登录→发评论→删除→登出 | 闭环全通 | **全通**，逐码见 §9.8.6（201·200·200·201·200·200·200·200·401） |
+| 越权（A 删 B 的评论） | 403 且评论仍在 | **403 FORBIDDEN**，且列表里 B 的评论**仍在**（t16 脚本 B-19/B-20） |
+| 限流（错误口令连打） | 第 11 次 429 + `Retry-After` | **第 1–10 次 401、第 11 次 429**，`retry-after: 3600`；第 12 次仍 429 |
+| 响应体不含 `password_hash`/`email`/`user_id` | 是 | 评论相关响应（创建/列表/我的）**不含**三者；`password_hash` 与 `user_id` 在**所有**响应里都不出现（库内是 `pbkdf2-sha256$600000$…`）。**例外**：`/api/auth/login` 成功体的 `user.email` 是**本人**邮箱（契约允许的成功体额外字段），另有 t19 已记的 `userId`/`detail` 冗余字段 → 见 §9.8.4 观察项 |
+| **直连 8850 不带/伪造密钥头**（冒充 nginx） | 必须 403；而经公网同一请求 200 | **不带=403、伪造=403、正确密钥=200**；公网同一请求 **200**（三条都实测） |
+| **给了 `--proxy-secret-file` 但密钥文件缺失/为空** | 服务**启动失败**（fail-fast，journal 有明确原因），不是静默降级 | **实测 exit 7**（缺文件/空文件/3 字符短密钥三种都 exit 7，stderr 有中文原因）；systemd 层 `ExecMainStatus=7` + `Failed with result 'exit-code'`，`is-active` 显示 **activating（auto-restart）** 而**不是** `failed` —— 见 §9.11.1 的口径订正 |
+| 代理密钥文件 | `/etc/p3blog/public-proxy-secret` 640 root:p3public、`/etc/p3blog/public-proxy-header.conf` 600 root:root，两者同值 64 位十六进制 | **640 root:p3public / 600 root:root / `same-value-ok` / `hex32-ok`**（`wc -l`=1）。注：本行的期望值原写 `root:blog`，实际必须是 `root:p3public`（组=服务账号），PLAN 第 4 步已按此写定 |
 
-### 9.2 可回滚点（t18 填）
+### 9.2 可回滚点（t26 实测填写）
 
 | 项 | 值 |
 | --- | --- |
-| 部署前 commit / 部署后 commit | TODO |
-| 伪静态备份 | `/root/p3-rewrite.bak-*.conf`、`/root/p3-rewrite.bak2-*.conf` |
-| 全库备份（**重置前**，t13 留的） | `/www/backup/p3-mysql-pre-reset-20261006-162241.sql.gz` |
-| 上线后新做的全库备份 | TODO（命令见 9.6） |
+| 部署前 commit / 部署后 commit | **`19d7458`**（`19d74583a9d045ea4972fde0cc68ee9edb5d502f`，部署前服务器 `HEAD` 与 `origin/main` 一致）<br>→ **`c30a8b7`**（`c30a8b70a3651988e4cb1770912016c2613eac40`，本轮上线提交，本机/服务器/GitHub 三方一致） |
+| 伪静态备份（**本轮实际生成**） | `/root/p3-rewrite.bak-20261006-181608`（部署前原状，sha256 `28924ae640e77b1bdc164fbe0d21f5f1ca624ca81ea91c04680ba29d47889a12`）<br>`/root/p3-rewrite.bak2-20261006-181706`（换段前，同上 sha256 —— 与 bak 同值）<br>`/root/p3-rewrite.bak3-20261006-181726`（真正被替换前那一刻，sha256 同上）。**回滚首选 bak3**（与线上被替换掉的内容逐字节相同） |
+| 全库备份（**重置前**，t13 留的） | `/www/backup/p3-mysql-pre-reset-20261006-162241.sql.gz`（193801 B） |
+| 上线后新做的全库备份 | **`/www/backup/p3blog-postdeploy-20261006-182052.sql.gz`**（5688 B，`gzip -t` OK，sha256 `08a66b43f4672984cc4e154b072241a8e3a342472d7cfdaa288b88b28b466773`；只含 `p3blog` 库，命令见 9.6） |
 | `/etc/my.cnf` 备份 | `/root/p3-my.cnf.bak-20261006-162432`、`/root/p3-my.cnf.bak2-20261006-162613` |
 | binlog 索引备份 | `/root/p3-mysql-bin.index.bak-20261006-162105` |
-| 代理密钥（新机制，n/a 表示由 t18 首次生成） | `/etc/p3blog/public-proxy-secret`(640 root:blog)、`/etc/p3blog/public-proxy-header.conf`(600 root:root) |
+| 仓库权限回滚清单（新机制） | `/root/p3-perms-rollback-20261006-181841.txt`（600 root:root，181470 B；逐行 `chmod/chown` 清单，`p3-fix-repo-perms.sh` 执行前抓的） |
+| iptables 快照（新机制） | `/etc/p3blog/iptables.rules`（600 root:root，1198 B，sha256 `0aba0a480d226d245e42bf62d63acd8f86614b45551f233bc2c1e44d4eadddc2`；`p3-firewall.service` 开机恢复的就是它） |
+| 代理密钥（新机制，本轮首次生成） | `/etc/p3blog/public-proxy-secret`(**640 root:p3public**)、`/etc/p3blog/public-proxy-header.conf`(**600 root:root**)；另留一份值守副本 `/root/p3-proxy-secret.keep`（fail-fast 实测时用来校验"复原后逐字节相同"）。**值不进仓库**（`grep -rn "$h" /srv/blog/repo` → `repo-clean-ok`） |
+| 数据库表结构来源 | `blog-enter/server/sql/schema.sql`（t13 已在线上执行，本轮未改库结构） |
+
+**本轮的回滚命令（按顺序，每条都可在原机直接抄）**
+
+```bash
+# ① 停公开服务（最快，公网 /api/* 变 502/504；页面降级为"接口不可用"）
+systemctl disable --now p3-public
+# ② 回退伪静态（用真正被替换前那一刻的备份）并 reload
+RW=/www/server/panel/vhost/rewrite/43.108.100.116.conf
+cp -a "$RW" "/root/p3-rewrite.before-rollback-$(date +%Y%m%d-%H%M%S)"
+cp -a /root/p3-rewrite.bak3-20261006-181726 "$RW"
+/www/server/nginx/sbin/nginx -t && /www/server/nginx/sbin/nginx -s reload
+# ③ 回退代码（前端与后端一起退回部署前）
+sudo -u blog git -C /srv/blog/repo reset --hard 19d7458
+sudo -u blog env PATH=/usr/local/bin:/usr/bin:/bin /usr/local/bin/blog-publish   # 重新发布旧前端
+# ④ 若要先保数据：先备份再删库（9.6 的命令）
+# ⑤ 删掉本轮加的防火墙兜底规则（可选，回滚到"只靠绑定"的旧状态）
+bash /srv/blog/repo/deploy/bin/p3-restrict-loopback-ports.sh --remove
+```
+
+> 只需 ①+② 就能让公网回到"没有公开登录/评论"的旧观感（页面仍引用 `js/comments.js`，
+> 会显示"接口不可用"的降级态）；要连前端也回去就补 ③。**恢复 Waline 见 9.5**，
+> 它与两份密钥文件是联动的：只回退 nginx 段、不回退 `--proxy-secret-file`，公网 `/api/*`
+> 会**全部 403**（后端仍要求密钥而 nginx 不再注入，属 fail-closed 预期行为）。
 
 ### 9.3 回滚动作 A：停用公开服务（最快，30 秒）
 
@@ -487,26 +519,33 @@ mysql --defaults-file=/etc/my.cnf -e "SELECT user,host FROM mysql.user WHERE use
 评论、再经 SQL 通道删除本轮用户行（外键级联带走会话与评论）并清零登录限流；`--keep-data`
 可保留数据供人工查看，`--skip-rate-limit` 可跳过 429 段（跳过会记成失败，不隐瞒）。
 
-#### 9.8.1 本轮状态（2026-10-06）
+#### 9.8.1 本轮状态（2026-10-06 —— **t26 部署后已补跑 B 部分**）
+
+> ⚠️ **数字更正**：本表原写 A 部分 `107/107`，那是 t16 首次跑时的旧快照。t26 部署当天在
+> **同一份脚本、同一修订**上重跑，A 部分是 **113 项 PASS 113 / FAIL 0**；B 部分（公网真实入口）
+> 是 **35 项 PASS 34 / FAIL 1（NA 0）**。下面全部按**本轮真实数字**写，未通过的 1 项照样列出来。
 
 | 判据 | 实测命令 | 实际结果 | 结论 |
 | --- | --- | --- | --- |
-| **A. 本地 7 端点（+`mine`）的成功与失败路径全部实测** | `node blog-enter/server/tests/verify-public-live.mjs --local --out .preview/t16/local-report.md` | `合计 107 项：PASS 107 / FAIL 0`（失败形状断言累计 48 条），exit 0 | **通过** |
-| **B. 公网真实入口闭环** | 同上脚本 `--base http://43.108.100.116 --ssh root@43.108.100.116` | **未执行**：本轮线上尚未部署（`systemctl is-active p3-public` = inactive；nginx 无 `/api/*` 段；`http://43.108.100.116/api/auth/me` → 404）。脚本已就绪并在本进程 shim 上自检 `31 PASS / 0 FAIL / 2 NA`，exit 0 | **待 t18 部署后补跑** |
-| 线上跨账号删除 403 / 未登录删除 401 | 同上 | 同上（本地与 shim 两条路径已全绿：A 删 B 的评论 → 403 且目标仍在；未登录 / 伪造 cookie / 退出后 → 401） | **待 t18 后补跑** |
-| 线上错误口令连打 → 429 + 无口令哈希/邮箱泄漏 | 同上 | 同上（本地 HTTP 层内存窗口第 11 次 429 `Retry-After: 3600`；库内 `auth_throttle` 熔断单独验过；线上入口待跑） | **待 t18 后补跑** |
-| 脚本可重复执行且自清理；报告逐条给出命令与实测 | 见 9.8.2 | 本地 107 行报告表由 `--out` 落盘；SQL 通道（`--ssh`/`--sql-local`）在本机实测可用（`mysql -N -B p3blog` 经 ssh 返回 `0 0 0`，说明库存在且为空） | **通过（线上清理待跑）** |
+| **A. 本地 7 端点（+`mine`）的成功与失败路径全部实测** | `node blog-enter/server/tests/verify-public-live.mjs --local --out .preview/t26/local-report.md` | **`合计 113 项：PASS 113 / FAIL 0 / NA 0`**（失败形状断言累计 49 条），**exit 0** | **通过** |
+| **B. 公网真实入口闭环** | `node blog-enter/server/tests/verify-public-live.mjs --base http://43.108.100.116 --ssh root@43.108.100.116 --out .preview/t26/public-live-report.md` | **`合计 35 项：PASS 34 / FAIL 1 / NA 0`**，**exit 1**（唯一失败项 B-32，见 §9.8.5） | **34 通过 / 1 失败**（非阻塞，如实保留） |
+| 线上跨账号删除 403 / 未登录删除 401 | 同上 B 部分 | **通过**：B-19 A 删 B 的评论 → `403 FORBIDDEN`；B-20 被拒后 B 的评论**仍在**；B-21 未登录删 → `401 UNAUTHENTICATED` 且评论仍在；B-22 伪造 cookie → `401`；B-27 退出后再删 → `401` | **通过** |
+| 线上错误口令连打 → 429 + 无口令哈希/邮箱泄漏 | B-40/B-41 + §9.8.6 的"干净桶"复测 | **通过**：干净桶下第 1–10 次 `401`、**第 11 次 `429` + `retry-after: 3600`**，第 12 次仍 429；响应体无口令哈希/邮箱 | **通过** |
+| 脚本可重复执行且自清理；报告逐条给出命令与实测 | 见 9.8.2 / 9.8.6 | **通过**：本轮 B 部分报告 35 行落盘 `.preview/t26/public-live-report.md`；SQL 通道经 ssh 可用，脚本自清理后 `users=0 comments=0 sessions=0`（复核见 §9.8.6） | **通过** |
+| 静态面（五页入口 / 无 Waline / 404 内联脚本 / 依赖清单不泄漏） | `curl` 逐条 + `deploy/bin/check-csp-hash.mjs` | **通过**：五页 `data-auth-entry=1`、`auth-ui.js≥1`；`article.html` waline=0；`/package.json`、`/server/*.mjs`、`/evil.mjs` 全 404；线上 404 内联脚本 **444 字节 / `sha256-hYOyioQ9GfQfnJv4xh6Ewrh3HPmlKcVC0sXdC6HeEDc=`**，与配置声明**逐字符一致** | **通过** |
 
 > 除 429 那一段外，脚本对线上的**任何请求都不会写坏数据**；429 那一段会按契约把
 > **本机公网 IP 的登录限流锁 1 小时**（库内 `auth_throttle` + 进程内窗口）。解锁：
 > 部署后清理步骤会自动执行 `DELETE FROM auth_throttle WHERE action='login';`，
 > 手工解锁用 `ssh root@43.108.100.116 "mysql -N -B p3blog -e \"DELETE FROM auth_throttle WHERE action='login'\""`
 > （进程内窗口随 `systemctl restart p3-public` 清零）。
+> **t26 收尾时已执行**上面两步（清 `auth_throttle` + `restart p3-public`），
+> 实测 `login_throttle_rows=0`、`is-active=active`，演示环境**没有被锁**。
 
-#### 9.8.2 A 部分（本地，跑过）分组明细
+#### 9.8.2 A 部分（本地）分组明细
 
-命令：`node blog-enter/server/tests/verify-public-live.mjs --local --out .preview/t16/local-report.md`
-（逐条「判据 → 命令 → 实测 → 结果」在 `.preview/t16/local-report.md`，107 行）
+命令：`node blog-enter/server/tests/verify-public-live.mjs --local --out .preview/t26/local-report.md`
+（逐条「判据 → 命令 → 实测 → 结果」在 `.preview/t26/local-report.md`；**本轮合计 113 项，PASS 113 / FAIL 0**）
 
 | 分组 | 项数 | 结果 |
 | --- | --- | --- |
@@ -527,22 +566,112 @@ mysql --defaults-file=/etc/my.cnf -e "SELECT user,host FROM mysql.user WHERE use
 NA 2`，exit 0。NA 的两项是需要 SQL 通道的库内行数核对与 SQL 侧清理 —— 这是如实标注"不适用"，
 不是通过。
 
-#### 9.8.3 B 部分（公网，t18 部署后执行；命令照抄即可）
+#### 9.8.3 B 部分（公网）—— 命令与**本轮实测结果**
 
 ```bash
-# 1) 公网入口（从能连公网的机器）
+# 1) 公网入口（从能连公网的机器）—— t26 已跑，见下
 node blog-enter/server/tests/verify-public-live.mjs \
   --base http://43.108.100.116 --ssh root@43.108.100.116
 
 # 2) 回环 8850（在服务器上跑；--sql-local 用 /etc/my.cnf [client] 的 root 凭据查库）
+#    本轮未跑这条：公网入口那条已覆盖同一套代码路径，且回环 8850 的密钥头语义
+#    由 §9.1 的 403/200 反证覆盖（直连不带密钥头本来就该 403，脚本没带密钥头会全红）。
 scp blog-enter/server/tests/verify-public-live.mjs root@43.108.100.116:/tmp/t16-verify.mjs
 ssh root@43.108.100.116 "node /tmp/t16-verify.mjs --base http://127.0.0.1:8850 --sql-local"
 ```
 
-覆盖：注册→登录（拿 cookie）→发评论→列表可见→删除自己的→列表不可见→登出→旧 cookie 401；
-两个账号验跨账号删除 403 且目标评论仍在；未登录删除 401；错误口令连打触发 429 且响应体无
-口令哈希/邮箱；`users`/`comments`/`sessions` 行数与接口行为一致（含软删行仍在）；
-`/package.json`、`/server/*.mjs` 必须 404。
+**本轮 B 部分实测（命令与原始输出）**
+
+```
+$ node blog-enter/server/tests/verify-public-live.mjs --base http://43.108.100.116 --ssh root@43.108.100.116
+模式=live 本轮标记=t16vcd9923
+...
+============================================================
+合计 35 项：PASS 34 / FAIL 1 / NA 0（失败形状断言累计 1 条）
+耗时 19.0s
+失败项（含最小复现命令）：
+  · B-43_108_100_116-32 未知路径 → 404 NOT_FOUND
+    复现: curl -s http://43.108.100.116/api/definitely-not-here
+    实测: HTTP 404 null
+============================================================
+EXIT=1
+```
+
+覆盖（逐条都在本轮 B 报告里）：注册 201 → 登录 200 → `me` 200 → 发评论 201 →
+匿名列表可见 → `/api/comments/mine` 200 → 第二个账号 201 → **跨账号删除 403 且目标仍在** →
+未登录 401 → 伪造 cookie 401 → 删自己的 200 → 删后列表不可见 → 再删 404 → 登出 200（清 cookie）→
+退出后 401；415 / 405+Allow / OPTIONS 204 / 无 CORS 头；错误口令不可区分（不存在用户与错口令
+逐字节同形）；限流 429 + `Retry-After`；库内行数与接口行为一致（`approved=1 deleted=1`、软删行保留、
+`sessions` 无残留）；`/package.json`、`/server/*.mjs` 必须 404。
+
+#### 9.8.5 **唯一未通过的判据（B-32）—— 归因、影响面与处置建议**
+
+**现象**：`curl -s http://43.108.100.116/api/definitely-not-here` → **HTTP 404，响应体不是契约的
+JSON 失败体**（脚本记为 `HTTP 404 null`），而契约 §1.8/§3 要求"未知路径 → 404 + `{ok:false,error:{code:"NOT_FOUND"…}}`"。
+
+**归因（已定位到具体一处配置，不是产品代码 bug）**：这条路径**根本没到过后端**。
+`deploy/bt/nginx-locations.conf` 末尾那条兜底是
+
+```nginx
+location /api/ { return 404; }      # 白名单之外一律 404（默认拒绝）
+```
+
+它是**有意**的（模板注释第 326-333 行：把"哪些路径对外存在"钉死在白名单里，避免服务里哪天
+多一条内部/实验路径就自动上公网）。代价是：白名单外的 `/api/*` 由 **nginx 自己**回 404，
+响应体是站点那张 HTML 404 页（`error_page 404 /404.html`），**不会**是契约的 JSON 形状。
+
+**影响面（为什么判为非阻塞）**：8 条对外路由（`/api/auth/{me,register,login,logout}`、
+`/api/comments`、`/api/comments/mine`、`/api/comments/<id>`、外加 `/api/` 兜底）**全部在白名单里**，
+逐条实测通过；前端只打这几条，`OPTIONS` 也走白名单（204 + `Allow`）。契约那条 JSON 404 形状
+在**后端可达**的路径上仍然成立（例如 B-25 的 `DELETE /api/comments/<已软删 id>` → `404 NOT_FOUND`）。
+所以：**功能无影响，只是"未知路径的 404 形状"这一条在公网入口与契约不一致**。
+
+**两条处置路径（都需要改仓库文件，t26 的 inScope 只有 `deploy/DEPLOY-RECORD.md`，故只报告不动手）**：
+
+| 方案 | 改动 | 说明 |
+| --- | --- | --- |
+| A（推荐，零 nginx 改动） | 把契约 §1.8/§3 的措辞收窄为"**服务可达的路径**上未知资源回 JSON 404；白名单外路径由 nginx 默认拒绝（HTML 404）" | 现状本来就是**更严**的默认拒绝；改文档即可对齐，且不动任何安全边界 |
+| B（要对齐形状） | nginx 兜底改成把未列举的 `/api/*` 也转给后端（`location /api/ { proxy_pass … }` + 后端自己回 JSON 404） | **会削弱白名单**：路径存在性重新由后端决定，等于放弃"默认拒绝"这一层 —— 与模板注释里的取舍相反，不建议在演示期做 |
+
+**复现命令**（一行，任何人可复算）：
+
+```bash
+curl -s -i http://43.108.100.116/api/definitely-not-here | head -3   # 期望-现状：404 且 Content-Type: text/html
+curl -s -i http://43.108.100.116/api/auth/xyz | head -1              # 同理 404（白名单兜底）
+curl -s -i -X DELETE http://43.108.100.116/api/comments/999          # 对照：这条在后端 → JSON 404
+```
+
+#### 9.8.6 t26 自己做的公网闭环（独立于 t16 脚本，逐码留痕）
+
+脚本 `.preview/t26/e2e.mjs`（临时物，`.gitignore` 的 `.preview/*` 覆盖，不入库）。
+命令：`node .preview/t26/e2e.mjs`。**每步状态码**（原样抄自终端）：
+
+```
+201  1 register   bodyKeys=ok,user  cookie=p3_uid=<token>; Path=/api; HttpOnly; SameSite=Lax; Max-Age=2592000
+200  2 login      user=t26e2e5fc767a cookieAttrs=HttpOnly/SameSite=Lax/Path=/api
+200  3 me         user=t26e2e5fc767a db=up
+201  4 post comment  id=5
+200  5 list visible  count=1 hasMine=true
+200  6 delete own    deleted=5
+200  7 list after delete  count=0 stillThere=false
+200  8 logout     destroyed=true clearCookie=yes
+401  9 delete after logout  code=UNAUTHENTICATED
+```
+
+**限流"干净桶"复测**（先清库内计数 + `restart p3-public` 清进程内窗口，再从公网入口连打）：
+
+```
+attempt 1..10 -> 401
+attempt 11    -> 429
+第 12 次响应头：HTTP/1.1 429 Too Many Requests / retry-after: 3600
+```
+
+**收尾清理**（脚本自清理 + 手工复核）：
+
+```
+before users=2 comments=1 sessions=3
+after  users=0 comments=0 sessions=0 throttle_login=0
+```
 
 #### 9.8.4 观察（非阻塞，不影响本轮判定）
 
@@ -552,6 +681,17 @@ ssh root@43.108.100.116 "node /tmp/t16-verify.mjs --base http://127.0.0.1:8850 -
   恰好 `ok`/`error`），且 `detail` 只是 `"ok"`、`userId` 与 `user.id` 重复，不含敏感信息，
   前端按 `code` 分支也不受影响 —— 故**记为观察项而非缺陷**。要收紧形状的话，把 login 分支
   改成与 register 一样自己 `sendJson` 即可（属实现方决定，verifier 未改产品代码）。
+  **t26 在公网上复现了这条**（注册一个临时账号后登录，原样输出）：
+  ```
+  login 200 top-level keys: ok,user,userId,detail
+  raw: {"ok":true,"user":{"id":6,"username":"t26sh697098","avatar":null,"role":"user",
+        "created_at":"2026-10-06T10:21:19.000Z","email":"t26sh697098@t26.example"},
+        "userId":6,"detail":"ok"}
+  ```
+  同一份响应里 `user.email` 是**本人**邮箱（契约允许"email 只在本人响应里出现"）。
+  因此"响应体不含 email"这条只在**评论相关响应**上是全称成立的（创建/列表/我的三条实测均无）；
+  口令哈希与 `user_id` 则**任何**响应里都不出现。该临时账号已在收尾清理中删除。
+* **`systemctl is-active` 不能直接当 fail-fast 的判据**（t26 实测订正，见 §9.11.1）。
 
 ---
 
@@ -606,6 +746,26 @@ node deploy/bin/check-csp-hash.mjs
 
 * 配置里声明的值**等于**当前工作区文件按规范算法算出的值 ⇒ 就"将要发布的这一版"而言，
   声明是**对的**，不存在"保留一个对不上的 hash"。**保持内联 + hash，不改成外链。**
+* **t26 部署后已确认（2026-10-06 18:19，本轮实测 —— 这条把上面的推断变成了实测）**：
+  发布 `c30a8b7` 后，**线上产物**与**服务器工作区副本**两份 `404.html` 各只有 1 个内联脚本块，
+  **均为 444 字节、均为 `sha256-hYOyioQ9GfQfnJv4xh6Ewrh3HPmlKcVC0sXdC6HeEDc=`**，
+  与 `deploy/bt/nginx-locations.conf` 里的声明逐字符一致：
+
+  ```
+  === 404.html inline script hash (LIVE) ===
+  block1 bytes=444 sha256-hYOyioQ9GfQfnJv4xh6Ewrh3HPmlKcVC0sXdC6HeEDc=     ← curl http://43.108.100.116/404.html
+  inline-blocks=1
+  === 404.html inline script hash (服务器工作区副本) ===
+  block1 bytes=444 sha256-hYOyioQ9GfQfnJv4xh6Ewrh3HPmlKcVC0sXdC6HeEDc=     ← /srv/blog/repo/blog-enter/404.html
+  inline-blocks=1
+  === 声明值 ===
+  sha256-hYOyioQ9GfQfnJv4xh6Ewrh3HPmlKcVC0sXdC6HeEDc=
+  ```
+
+  ⇒ **S8 假阳性结论成立且已被线上产物实测坐实**：评审者拿到不同 hash 的原因正是"线上产物
+  尚未随发布更新"，而**不是**配置错。发布生效后，线上字节**等于**声明值。
+  （仍未做的是"真 Chrome 实算"这一步 —— 本沙箱起不了 Chrome，见下一条；但那属于**第四种取法**，
+  与"配置声明 == 线上字节"这个判据无关。）
 * **t20 在部署后顺带确认**：发布新产物后，用下面这条取**线上**字节比对，期望等于上表第一行；
   若仍不等，说明发布没有真正覆盖 404.html（那就不是 hash 的问题，而是发布没生效）：
 
