@@ -838,3 +838,152 @@ node deploy/bin/check-csp-hash.mjs
 后开 `http://127.0.0.1:8080`），**禁止在这条 HTTP 链路上输入任何真实口令**
 （尤其不要复用你在别处用过的口令）。
 
+---
+
+## 10. 站点外壳（可收起侧边栏 / 访问统计 / 标签云）+ 访问统计端点 —— 2026-10-06 已上线
+
+> 本节由**本轮改动的落地者**于 2026-10-06 22:00–22:15 CST 在 `root@43.108.100.116`
+> 逐条实测填写。凡写"实测"的行都当场跑过并把原始输出贴在最下面；没有实测的一律写"未实测"。
+>
+> 上线提交：`c85dac7`（功能）→ `c123c3f`（`path` 语义修正）。回滚见 §10.4。
+
+### 10.1 对外可见的改动
+
+| 位置 | 改动 | 实测 |
+| --- | --- | --- |
+| 五个页面共用 | 新增 `css/shell.css`（排在所有皮肤之后）+ `js/shell.js`（`<head>` 里**同步**加载，不能 defer） | 线上五页 200，无 4xx 资源（真浏览器网络层逐条核对） |
+| 侧边栏 | 桌面 76px 图标栏 ⇄ 完整文字菜单；偏好 `localStorage['p3.shell.nav']`，**首屏绘制前**应用；`[` 键切换；≤980px 仍走 MENU 抽屉 | 线上 64 项断言全过，含"DOMContentLoaded 那一刻侧边栏宽度已是 76px"（无闪动的硬证据） |
+| 访问统计 | 内页页脚上方一行 / 首屏左下角（入水后淡入）；拿不到后端时退回本机记录并**如实标注来源** | 见 §10.2、§10.3 |
+| 标签云 | 归档页按标签下文章数缩放字号（三档颜色），与标签胶囊共用一份状态；"全部"清空所有筛选 | 点击目标已修到 ≥24×24（WCAG 2.2）；13 种宽度无横向溢出 |
+
+### 10.2 新增接口（契约 §1.8 / §1.9）—— 公网入口实测
+
+```
+$ GET  http://43.108.100.116/api/stats
+200 {"ok":true,"stats":{"total":0,"today":0,"visitors":0,"day":"2026-10-06"}}
+$ POST http://43.108.100.116/api/stats/hit   (Content-Type: application/json, body {})
+200 {"ok":true,"stats":{"total":1,"today":1,"visitors":1,"day":"2026-10-06"}}
+$ POST .../api/stats/hit（第二次）
+200 {"ok":true,"stats":{"total":2,"today":2,"visitors":1,"day":"2026-10-06"}}   ← PV +1，UV 不变（正确）
+$ GET  .../api/stats/hit      → 405（路径存在、方法不对）
+$ POST .../api/stats          → 405
+$ GET  .../api/stats/anything → 404   ← 白名单仍然精确：兜底 404 未被放宽
+$ GET  .../api/auth/me        → 200 {"ok":true,"user":null,"db":"up","session_max_age_days":30}
+```
+
+回环 8850 直连（不带头）实测仍是 `403 FORBIDDEN` —— 反代密钥那道闸没有因为新增路由而松动：
+
+```
+$ curl -s http://127.0.0.1:8850/api/stats      # 不带 x-admin-proxy-secret
+403 {"ok":false,"error":{"code":"FORBIDDEN","message":"forbidden"}}
+```
+
+### 10.3 库与数据（实测）
+
+`SHOW TABLES` 由 6 张变 8 张，新增两张：
+
+```
+| Field   | Type         | Null | Key | Default           | Extra          |
+| id      | bigint(20)   | NO   | PRI | NULL              | auto_increment |
+| day     | date         | NO   | MUL | NULL              |                |
+| visitor | char(32)     | NO   | MUL | NULL              |                |
+| path    | varchar(120) | NO   |     |                   |                |
+| at      | timestamp    | NO   |     | CURRENT_TIMESTAMP |                |
+
+page_meta：k varchar(40) PRI / v varchar(200) / updated_at timestamp
+```
+
+* 盐已生成：`SELECT k, LENGTH(v)` → `visitor_salt  64`（32 字节随机的十六进制）。
+* **库里没有明文 IP**：`visitor` 是 32 位十六进制；`LEFT(visitor,8)` 实测 `473b09bc`。
+* `path` 记的是**被访问的页面**（取自同源 Referer），实测按页面聚合：
+
+```
+| path           | pv |
+| /api/stats/hit | 19 |   ← 修正前的旧行（第一版把接口自己的路径记了进去）
+| /about.html    | 10 |
+| /archive.html  |  5 |
+| /404.html      |  1 |
+| /index.html    |  1 |
+```
+
+* 总量/去重（实测）：`total=36  uv=2` —— 2 个 UV 来自"curl 与浏览器 UA 不同"，
+  顺带证明 UA 确实参与了访客标识（同一 IP 不同 UA 算不同访客）。
+
+### 10.4 本轮部署动作与回滚点
+
+按顺序执行（都在 2026-10-06 21:59–22:08）：
+
+```bash
+# 1) 推 GitHub（本机）：git push origin main → c123c3f
+# 2) 服务器拉取 + 发布静态站（blog 身份；会 fast-forward 并把 blog-enter 同步到站点根）
+ssh blog@43.108.100.116 blog-publish
+#    实测：git: 已对齐到 origin/main（c123c3f） / published c123c3f / 自检通过
+
+# 3) 建表（幂等；schema.sql 可重复执行）
+ssh root@43.108.100.116 "mysql --default-character-set=utf8mb4 < /srv/blog/repo/blog-enter/server/sql/schema.sql"
+# 4) 同步 page_views.path 的列注释（仅元数据；见 §10.6 的说明）
+scp _fix-path-comment.sql root@43.108.100.116:/tmp/ && ssh root@43.108.100.116 "mysql < /tmp/fix-path-comment.sql"
+
+# 5) nginx 白名单加两条精确 location（脚本插入，幂等 + 自动备份）
+scp _patch-nginx-stats.py root@43.108.100.116:/tmp/ && ssh root@43.108.100.116 "python3 /tmp/patch-nginx-stats.py"
+#    实测：PATCHED ok；备份=/www/server/panel/vhost/rewrite/43.108.100.116.conf.bak.1791295263
+ssh root@43.108.100.116 "nginx -t && systemctl reload nginx"     # syntax ok / test successful / RELOADED
+
+# 6) 重启公开服务（新路由生效）
+ssh root@43.108.100.116 "systemctl restart p3-public && systemctl is-active p3-public"   # active
+```
+
+**回滚点（本轮新增，逐条可逆）**
+
+| 对象 | 回滚动作 |
+| --- | --- |
+| nginx 白名单 | `cp -a /www/server/panel/vhost/rewrite/43.108.100.116.conf.bak.1791295263 /www/server/panel/vhost/rewrite/43.108.100.116.conf && nginx -t && systemctl reload nginx`（备份是**加两条 location 之前**的原文，20987 字节） |
+| 服务代码 | `ssh blog@… "cd /srv/blog/repo && git reset --hard c30a8b7"`（上一个上线件）+ `systemctl restart p3-public` |
+| 站点产物 | 同上 reset 后 `ssh blog@… blog-publish` |
+| 新表 | `DROP TABLE p3blog.page_views, p3blog.page_meta;`（**只有当业主确认不要访问数据时**；五页的前端在缺表时自行退回"本机记录"，页面不会坏） |
+| 前端统计 | `js/data.js` 的 `stats.endpoint` 置空 → 立即退回本机记录（不用动后端） |
+
+### 10.5 线上验收（`verify-public-live.mjs --base … --ssh …` 实测）
+
+```
+合计 38 项：PASS 37 / FAIL 1 / NA 0
+[PASS] B-43_108_100_116-03 GET /api/stats → 200 + stats{total,today,visitors,day} + no-store
+[PASS] B-43_108_100_116-04 POST /api/stats/hit → 200，total 恰好 +1，today/visitors ≥ 1
+[PASS] B-43_108_100_116-05 GET /api/stats/hit → 405 + Allow: POST；缺 content-type → 415
+[FAIL] B-43_108_100_116-32 未知路径 → 404 NOT_FOUND
+```
+
+* 唯一失败项就是 **§9.8.5 已经记录在案、业主已知情的 B-32**（nginx 兜底 404 是 HTML 形状，
+  不是契约 JSON）—— 它不是本轮引入的：那段兜底与那条判据在上一轮就存在，本轮的改动只是
+  **在它前面**多插了两条精确 location，且实测 `/api/stats/anything` 仍然落到同一条兜底。
+* 其余 37 项（注册 / 登录 / 发评论 / 跨账号 403 / 伪造 cookie 401 / 软删 / 415 / 405+Allow /
+  OPTIONS / 限流 429+Retry-After / 库内行数核对 / 清理后残留为 0）**逐条 PASS**，
+  说明新增路由与限流项没有动到既有契约。
+* 真浏览器另跑 `.preview/verify-shell.mjs`（`SHELL_URL=http://43.108.100.116`）**64/0**，
+  含"来源标注写'后端'、第三项是访客数、刷新一次总访问量 +1"。
+
+### 10.6 本轮顺手修的既有缺陷与两处既有测试问题（都不隐瞒）
+
+**产品缺陷（已修，都有回归闸）**
+
+1. `about.html` 邮箱锚点漏写 `>` —— 整行空白、看着像排版错位（三个 `<span>` 被当成 `<a>` 的属性）。
+2. 浅底页"当前页"导航文字继承了深色皮肤的 `color: var(--white)` —— 白字在白底上只剩叠印阴影；
+   连带新图标栏里那一枚图标（`stroke: currentColor`）**整个消失**。已在 `geo.css` 显式覆盖为墨色。
+3. 标签云点击目标只有 43×20 —— 低于 WCAG 2.2 的 24×24，已加到 ≥28 高。
+4. `public-api.test.mjs` 漏了 `export { H }` —— `run-all.mjs` 的判定是"没导出就跳过"，
+   于是**整个 82KB 的公开面测试一直被静默漏跑**（症状：`run-all` 报 74 项，而单跑该文件有 78 项）。
+   补上导出后 `run-all` 由 74 → **153 项**全过。
+
+**既有测试问题（只校正判据，不改产品）**
+
+5. `verify-final.mjs` 的"article/404 保持深水底（不引 geo.css）"—— 文章详情页早在换肤那一轮
+   就改成纯白皮肤了（README 的皮肤表写着 pages → geo → prose-light），这条断言**从那时起一直红着**；
+   拿 HEAD 的干净站点跑同样 FAIL。已改成真正的判据：404 只有 `pages.css`，文章页是
+   `pages + geo + prose-light`（且只看 `<link href>`，不再被注释里的文件名带偏）。
+6. `verify-pages.mjs` 仍有 **4 条**历史失败（代码块含 `@property` / 正文配图 / 引用块 /
+   旧评论占位文案）—— 属正文内容与旧断言的口径差，与本轮无关：拿 HEAD 的干净站点跑，
+   失败集合与数目完全一致（105 通过 / 4 失败）。本轮**未处理**，留在这里备查。
+7. 静态预览没有 `/api`，因此 `/api/auth/me` 与 `/api/stats/hit` 的 404 在四套浏览器体检里
+   是**预期内**的：已按同一条窄规则（只放行这两条、且必须带 404）豁免，并在每处写明理由。
+
+
