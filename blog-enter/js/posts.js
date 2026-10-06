@@ -35,60 +35,14 @@ window.POSTS = [
 },
 
   {
-    slug: 'fan-menu-geometry',
-    title: '扇形菜单的几何：少即是多，也意味着要重算',
-    date: '2025-07-02',
-    category: '设计',
-    tags: ['布局', '交互', 'CSS'],
-    excerpt: '菜单从 7 项收到 3 项之后，原来的半径和张角全部失效：条目会在左上角挤成一团。这篇文章记录了重新推导的过程。',
-    body: [
-      '<p>扇形放射菜单的美感来自"从同一点沿弧线甩出去"。7 项的时候，每项相差 10°，整体铺开 60°，看起来像一把打开的折扇。</p>',
-      '<p>减到 3 项之后，如果还沿用原来的参数，会得到两件糟糕的事：</p>',
-      '<ul>',
-      '  <li>条目集中在上半区，整块视觉重心偏左上，右下大片留白；</li>',
-      '  <li>字号没变、间距没变，三项之间的空隙反而显得空旷，<strong>菜单看起来变小了</strong>。</li>',
-      '</ul>',
-
-      '<h2>先把"扇形"的参数收敛掉</h2>',
-      '<p>参数只有三个：半径 <code>r</code>、单项的角度 <code>θ</code>、相邻项的角度差 <code>Δθ</code>。条目在屏幕上的位置是：</p>',
-
-      '<pre><code class="lang-js">// 外层 .fan-item 负责极坐标定位，内层 .fan-link 只管悬停/选中的微动',
-      'const x = r * Math.cos(theta);',
-      'const y = r * Math.sin(theta);',
-      '',
-      '// 相邻两项的纵向间距 —— 字号变大时它必须同比变大，否则会叠字',
-      'const gapY = r * Math.abs(Math.sin(theta + dTheta) - Math.sin(theta));',
-      'const needY = lineHeight * fontSize * 1.35;',
-      'if (gapY &lt; needY) increaseRadiusOrShrinkSpread();</code></pre>',
-
-      '<p>字号 ×1.42，就要求 <code>gapY</code> 至少也 ×1.42。在 <code>Δθ</code> 不变的前提下，唯一的手段是把 <code>r</code> 一起放大：</p>',
-
-      '<pre><code class="lang-css">/* 同比增大：字号与半径同量级放大，风格参数一个没动 */',
-      '.fan-link {',
-      '  font-size: calc(clamp(38px, 4.4vw, 76px) * var(--font-scale, 1));',
-      '}',
-      '/* 7 项时是 clamp(28px, 3.2vw, 52px)，半径 560 → 820 */</code></pre>',
-
-      '<h2>张角反而要收</h2>',
-      '<p>3 项如果用 ±30° 铺开，整块会甩到屏幕左上角。收到 ±22° 之后，三条的落点大致是一条向右上倾斜的斜线，视觉重心回到画面中部。</p>',
-      '<figure>',
-      '  <img src="img/diagram-fan.svg" alt="扇形菜单几何示意：同一原点出发的三条射线，标出半径与相邻项间距" width="720" height="380">',
-      '  <figcaption>三条射线的角度差决定纵向间距，半径决定整体尺度；两者要一起调</figcaption>',
-      '</figure>',
-
-      '<h2>顺序里也有信息</h2>',
-      '<p>菜单项的排列顺序不是随意的。落水之后条目是<strong>依次旋出</strong>的，最后停稳的那一条会获得最多注意力。所以初始选中项应该落在"最想让访客点的那一条"上 —— 这里是博客文章，而不是第一项。</p>',
-      '<p>实现上不要写死索引，按语义去查：</p>',
-      '<pre><code class="lang-js">defaultIndex() {',
-      '  // 写死 3 会在条目数变化时指错位置',
-      '  const hit = this.items.findIndex(({ data }) =&gt; /archive\\.html/.test(data.href || ""));',
-      '  return hit &gt;= 0 ? hit : Math.floor((this.items.length - 1) / 2);',
-      '}</code></pre>',
-      '<blockquote>',
-      '  <p>少即是多，但"少"不会自动变好看。条目减少时必须重新推导几何参数，否则只是把稀疏当成了留白。</p>',
-      '</blockquote>'
-    ].join('\n')
-  },
+  slug: 'fan-menu-geometry',
+  title: '扇形菜单的几何：少即是多，也意味着要重新计算',
+  date: '2025-07-02',
+  category: '设计',
+  tags: ['布局', '交互', 'CSS'],
+  excerpt: '菜单从 7 项收到 3 项之后，原来的半径和张角全部失效：条目会在左上角挤成一团。这篇文章记录了重新推导的过程。',
+  body: '<p>扇形放射菜单的美感来自"从同一点沿弧线甩出去"。7 项的时候，每项相差 10°，整体铺开 60°，看起来像一把打开的折扇。</p>\n<p>减到 3 项之后，如果还沿用原来的参数，会得到两件糟糕的事：</p>\n<ul>\n  <li>条目集中在上半区，整块视觉重心偏左上，右下大片留白；</li>\n  <li>字号没变、间距没变，三项之间的空隙反而显得空旷，<strong>菜单看起来变小了</strong>。</li>\n</ul>\n<h2>先把"扇形"的参数收敛掉</h2>\n<p>参数只有三个：半径 <code>r</code>、单项的角度 <code>θ</code>、相邻项的角度差 <code>Δθ</code>。条目在屏幕上的位置是：</p>\n<pre><code class="lang-js">// 外层 .fan-item 负责极坐标定位，内层 .fan-link 只管悬停/选中的微动\nconst x = r * Math.cos(theta);\nconst y = r * Math.sin(theta);\n\n// 相邻两项的纵向间距 —— 字号变大时它必须同比变大，否则会叠字\nconst gapY = r * Math.abs(Math.sin(theta + dTheta) - Math.sin(theta));\nconst needY = lineHeight * fontSize * 1.35;\nif (gapY &lt; needY) increaseRadiusOrShrinkSpread();</code></pre>\n<p>字号 ×1.42，就要求 <code>gapY</code> 至少也 ×1.42。在 <code>Δθ</code> 不变的前提下，唯一的手段是把 <code>r</code> 一起放大：</p>\n<pre><code class="lang-css">/* 同比增大：字号与半径同量级放大，风格参数一个没动 */\n.fan-link {\n  font-size: calc(clamp(38px, 4.4vw, 76px) * var(--font-scale, 1));\n}\n/* 7 项时是 clamp(28px, 3.2vw, 52px)，半径 560 → 820 */</code></pre>\n<h2>张角反而要收</h2>\n<p>3 项如果用 ±30° 铺开，整块会甩到屏幕左上角。收到 ±22° 之后，三条的落点大致是一条向右上倾斜的斜线，视觉重心回到画面中部。</p>\n<figure>\n  <img src="img/diagram-fan.svg" alt="扇形菜单几何示意：同一原点出发的三条射线，标出半径与相邻项间距" width="720" height="380">\n  <figcaption>三条射线的角度差决定纵向间距，半径决定整体尺度；两者要一起调</figcaption>\n</figure>\n<h2>顺序里也有信息</h2>\n<p>菜单项的排列顺序不是随意的。落水之后条目是<strong>依次旋出</strong>的，最后停稳的那一条会获得最多注意力。所以初始选中项应该落在"最想让访客点的那一条"上 —— 这里是博客文章，而不是第一项。</p>\n<p>实现上不要写死索引，按语义去查：</p>\n<pre><code class="lang-js">defaultIndex() {\n  // 写死 3 会在条目数变化时指错位置\n  const hit = this.items.findIndex(({ data }) =&gt; /archive\\.html/.test(data.href || ""));\n  return hit &gt;= 0 ? hit : Math.floor((this.items.length - 1) / 2);\n}</code></pre>\n<blockquote>\n  <p>少即是多，但"少"不会自动变好看。条目减少时必须重新推导几何参数，否则只是把稀疏当成了留白。</p>\n</blockquote>'
+},
 
   {
   slug: 'static-blog-without-framework',
