@@ -21,7 +21,7 @@ window.POSTS = [
   date: '2026-10-06',
   category: '随笔',
   tags: ['现代诗'],
-  body: '<p>路上的人们，低头扮演修女祷告，</p>\n<br>\n<p>居家的少年，咏唱着电子圣经，</p>\n<br>\n<p>电子洋流中，“我们”在游。</p>\n<br>\n<br>\n<p>在信息之下百万“硅基生命”，</p>\n<br>\n<p>我与“我”编号相邻。</p>\n<br>\n<br>\n<p>在这片亿亿token组成的示拿平原上，</p>\n<br>\n<p>巴别塔为谁而筑？</p>\n<br>\n<br>\n<p>人们齐诵：我们如一。</p>\n<br>\n<br>\n<p>新时代的飞蛾扑向荧幕，</p>\n<br>\n<p>那里才是我们的归宿。</p>'
+  body: '<p>路上的人们，低头扮演修女祷告，</p>\n<br>\n<p>居家的少年，咏唱着电子圣经，</p>\n<br>\n<p>电子洋流中，“我们”在游。</p>\n<br>\n<br>\n<p>在信息之下百万“硅基生命”，</p>\n<br>\n<p>我与“我”编号相邻。</p>\n<br>\n<br>\n<p>在这片亿亿token组成的示拿平原上，</p>\n<br>\n<p>巴别塔为谁而筑？</p>\n<br>\n<br>\n<p>人们齐诵：我们如一。</p>\n<br>\n<br>\n<p>新时代的飞蛾扑向荧幕，</p>\n<br>\n<p>那里才是我们的归宿。</p>\n<figure>\n  <img src="img/uploads/微信图片-2026-10-06-232105-709.jpg" alt="微信图片_2026-10-06_232105_709.jpg" width="720" height="380">\n  <figcaption></figcaption>\n</figure>\n'
 },
 
   {
