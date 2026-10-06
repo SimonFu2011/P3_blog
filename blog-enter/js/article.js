@@ -71,6 +71,12 @@
     const shell = $('#articleShell');
     if (shell) shell.hidden = true;
 
+    /* 评论区是 #articleShell 之外的兄弟节点，必须一起藏 —— 否则访问一个
+       不存在的 slug，会在"这篇文章不存在"下面留一个空评论区；接上 Waline
+       之后更糟：它还会真的去拉评论、甚至能发。 */
+    const comments = $('#comments');
+    if (comments) comments.hidden = true;
+
     const box = $('#notFound');
     if (!box) return;
     box.hidden = false;
@@ -227,6 +233,16 @@
 
     const shell = $('#articleShell');
     if (shell) shell.hidden = false;
+
+    /* 正文渲染成功才放开评论区，并且**只在这里**触发初始化：
+       评论客户端不自己判断文章是否存在（见 article.html 底部那段说明）。
+       window.initComments 由 article.html 的模块脚本准备，可能还没到位 ——
+       那种情况下它会自己回头读 window.Article 补一次，所以这里不用等。 */
+    const comments = $('#comments');
+    if (comments) {
+      comments.hidden = false;
+      if (window.initComments) window.initComments(post.slug);
+    }
 
     /* 代码高亮 / 复制按钮由 pages.js 负责：它在本文件之后执行（同为 defer，
        顺序按标签先后），会扫 .prose pre > code 并逐个套上外壳。

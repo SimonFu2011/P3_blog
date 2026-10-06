@@ -269,39 +269,51 @@
 .post-nav .pn-title { color: var(--g-ink); }
 
 /* ------------------------------------------------------------
-   7. 评论区占位
+   7. 评论区（Waline，客户端自托管在 comments/）
+   ------------------------------------------------------------
+   样式是第三方那一份（comments/waline.css）。这里**只覆盖它的 CSS 变量**
+   和几个直角的小地方，不去改它的选择器 —— 改选择器的话，将来升级 Waline
+   就得重新对一遍；覆盖变量则不用。
+   颜色一律从 --g-* 取，白底上的档位与正文一致。
    ------------------------------------------------------------ */
 .comments-box {
-  border: 1px solid var(--g-rule);
+  --waline-font-size: 15px;
+  --waline-theme-color: var(--g-cyan-dk);
+  --waline-active-color: var(--g-teal);
+  --waline-color: var(--g-ink);
+  --waline-dark-grey: var(--g-teal-2);
+  --waline-light-grey: var(--g-mute);
+  --waline-bg-color: #fff;
+  --waline-bg-color-light: var(--g-tint);
+  --waline-bg-color-hover: var(--g-paper);
+  --waline-border-color: var(--g-rule);
+  --waline-info-bg-color: var(--g-tint);
+  --waline-info-color: var(--g-mute);
+  --waline-bq-color: var(--g-tint);
+  --waline-avatar-radius: 0;
+  --waline-border: var(--g-hair) solid var(--g-rule);
+
+  border: var(--g-hair) solid var(--g-rule);
   border-radius: 0;
   background: var(--g-paper);
   box-shadow: none;
 }
+/* Waline 自己就是一块带边框的面板，外面再套一层卡片就成了"框中框"：
+   资源到位（.is-live）之后把占位用的外壳收掉。 */
+.comments-box.is-live {
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+}
+/* 直角：与站点其它块一致（Waline 默认是圆角、虚线标题栏） */
+.comments-box .wl-panel,
+.comments-box .wl-btn,
+.comments-box .wl-header { border-radius: 0; }
+.comments-box .wl-header { border-bottom: var(--g-hair) solid var(--g-rule); }
 .comments-box .cb-title { color: var(--g-ink); }
 .comments-box p { color: var(--g-teal-2); }
-.comments-ways li { color: var(--g-teal-2); }
-.comments-ways li::before { color: var(--g-cyan-dk); }
-.comments-ways b { color: var(--g-teal); }
-.comments-skel .cs-av { background: var(--g-tint); }
-.comments-skel .cs-lines i { background: var(--g-tint); }
-.comments-skel li {
-  border: var(--g-hair) solid var(--g-rule);
-  border-radius: 0;
-  background: #fff;                 /* 深色版是半透明深底，白底上要清掉 */
-}
-.comments-skel .cs-av {
-  border: var(--g-hair) solid var(--g-rule-2);
-  /* 深色版是斜纹填充，白底上换成更淡的斜纹，保持"占位"语义 */
-  background:
-    repeating-linear-gradient(45deg, rgba(2, 132, 199, .14) 0 4px, transparent 4px 8px);
-}
 .comments-note { color: var(--g-mute); }
-.comments-note code {
-  border: 1px solid var(--g-rule);
-  border-radius: 0;
-  background: #fff;
-  color: var(--g-cyan-dk);
-}
 
 /* ------------------------------------------------------------
    8. 空状态 / 软 404（文章不存在时的那一块）

@@ -973,7 +973,7 @@ a.tag:hover, button.tag:hover { border-color: var(--sky-2); color: var(--white);
 .post-nav .pn-title { font-size: 14.5px; color: var(--white); line-height: 1.5; }
 .post-nav a.is-empty { visibility: hidden; }
 
-/* 评论区占位 */
+/* 评论区块（Waline；客户端资源自托管在 comments/，皮肤变量见 prose-light.css） */
 .comments {
   max-width: 78ch;
   margin-top: clamp(30px, 5vh, 54px);
@@ -982,6 +982,7 @@ a.tag:hover, button.tag:hover { border-color: var(--sky-2); color: var(--white);
   display: flex; align-items: baseline; gap: 12px;
   margin-bottom: 16px;
 }
+/* 资源到位前的占位卡片；Waline 初始化后由 .is-live 收掉外壳（避免框中框） */
 .comments-box {
   display: grid; gap: 14px;
   padding: clamp(20px, 3vw, 32px);
@@ -989,53 +990,21 @@ a.tag:hover, button.tag:hover { border-color: var(--sky-2); color: var(--white);
   border-radius: 3px;
   background: rgba(4, 20, 34, .42);
 }
+.comments-box.is-live {
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+}
 .comments-box .cb-title {
   font-family: var(--font-en); font-weight: 900; font-style: italic;
   font-size: clamp(17px, 1.5vw, 21px); letter-spacing: .04em;
   color: var(--white);
 }
 .comments-box p { color: var(--fg-2); font-size: 14px; }
-/* 两种接入路线：做成带标题的短列表，而不是一堆胶囊 */
-.comments-ways { display: grid; gap: 8px; }
-.comments-ways li {
-  position: relative;
-  padding-left: 1.5em;
-  color: var(--fg-2); font-size: 13.5px;
-}
-.comments-ways li::before {
-  content: ""; position: absolute; left: .3em; top: .72em;
-  width: 7px; height: 7px;
-  background: var(--red); transform: skewX(-14deg);
-}
-.comments-ways b { color: var(--cyan-2); }
 #commentsMount:empty { display: none; }
-.comments-skel { display: grid; gap: 12px; margin-top: 4px; }
-.comments-skel li {
-  display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px;
-  align-items: center;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  background: rgba(3, 18, 32, .4);
-}
-.comments-skel .cs-av {
-  width: 40px; height: 40px; border-radius: 50%;
-  border: 1px solid var(--line-2);
-  background:
-    repeating-linear-gradient(45deg, rgba(125, 211, 252, .18) 0 4px, transparent 4px 8px);
-}
-.comments-skel .cs-lines { display: grid; gap: 7px; }
-.comments-skel .cs-lines i {
-  display: block; height: 8px; border-radius: 4px;
-  background: rgba(125, 211, 252, .17);
-}
-.comments-skel .cs-lines i:last-child { width: 46%; }
 .comments-note {
   font-size: 12px; letter-spacing: .1em; color: var(--fg-3);
-}
-.comments-note code {
-  font-family: var(--font-code); color: var(--cyan-2);
-  background: rgba(3, 18, 32, .6); padding: .1em .4em; border-radius: 3px;
 }
 
 /* "文章不存在"时复用空状态 */
