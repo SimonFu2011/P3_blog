@@ -92,9 +92,12 @@
            评论区是 #articleShell 之外的兄弟节点，不这样的话，访问一个不
            存在的 slug 会在"这篇文章不存在"下面多出一个空评论区，
            而且会真的去拉评论、甚至能发评论。
-         · 客户端资源**自托管**（comments/waline.js、comments/waline.css），
+         · 客户端资源**自托管**（comments-assets/waline.js、comments-assets/waline.css），
            不走 unpkg：那玩意儿国内不稳定，挂了就是评论区一片空白，而且是
-           运行时才失败 —— 本地测不出来。
+           运行时才失败 —— 本地测不出来。资源放在 comments-assets/ 而不是
+           comments/，是因为 nginx 把整段 /comments/ 都反代给 Waline 了
+           （接口 /comments/api/、后台 /comments/ui/、验证链接 /comments/verification
+           都是 Waline 的路由），静态资源混在里面会被一起转走然后 404。
          · 初始化只有一个入口 window.initComments(slug)：由下面的模块脚本
            准备，由 article.js 调用。文章到底存不存在，只由 article.js 判定。
          ------------------------------------------------------------ -->
@@ -187,10 +190,10 @@
       try {
         const css = document.createElement('link');
         css.rel = 'stylesheet';
-        css.href = 'comments/waline.css';
+        css.href = 'comments-assets/waline.css';
         document.head.appendChild(css);
 
-        const { init } = await import('./comments/waline.js');
+        const { init } = await import('./comments-assets/waline.js');
 
         if (loading) loading.hidden = true;
         if (box) box.classList.add('is-live');   /* 收掉占位卡片的外壳 */
