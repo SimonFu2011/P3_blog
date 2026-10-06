@@ -122,11 +122,22 @@ PY
 fi
 
 echo "== 6. 环境变量 $ENV_FILE（保留已有 JWT_TOKEN）=="
+# ⚠️ 这个文件里会有人手填的 SMTP 授权码。**已经有 SMTP_* 就不覆盖** ——
+#    否则重跑一次安装脚本就把验证码配置抹了，症状是"评论突然又要不了验证码"
+#    （或者反过来：SMTP 没了但 LOGIN=force，谁也评论不了）。
+ENV_CUSTOMIZED=0
+if [ -f "$ENV_FILE" ] && grep -qE '^[[:space:]]*SMTP_[A-Z_]+=' "$ENV_FILE"; then
+  ENV_CUSTOMIZED=1
+  cp -a "$ENV_FILE" "$ENV_FILE.bak-$(date +%F-%H%M%S)"
+  echo "  检测到已填的 SMTP_*：**不覆盖** $ENV_FILE（已另存一份备份）"
+  echo "  要重新生成模板：先手动把那些 SMTP_ 行删掉再跑本脚本。"
+fi
 JWT=""
 if [ -f "$ENV_FILE" ]; then
   JWT="$(grep '^JWT_TOKEN=' "$ENV_FILE" | head -n 1 | cut -d= -f2- || true)"
 fi
 [ -n "$JWT" ] || JWT="$(openssl rand -hex 32)"
+if [ "$ENV_CUSTOMIZED" = "0" ]; then
 install -m 640 -o root -g blog /dev/null "$ENV_FILE"
 cat > "$ENV_FILE" <<EOF
 # ============================================================
@@ -170,15 +181,30 @@ WALINE_ADMIN_MODULE_ASSET_URL=$SITE_URL_VALUE/comments-assets/waline-admin.js
 
 # ---- 邮件（邮箱验证码）：填上就自动开启"注册/评论要验证码"----
 # 顺序不能反：先验通发信，再开 LOGIN=force。发不出信 = 谁也评论不了。
+# 验通的办法：bash deploy/bin/check-waline-smtp.sh [收件邮箱]
+#
+# QQ / 163（授权码，不是登录密码；465 + SSL）
 # SMTP_SERVICE=QQ
 # SMTP_USER=you@qq.com
-# SMTP_PASS=<SMTP 授权码，不是登录密码>
+# SMTP_PASS=<SMTP 授权码>
 # SMTP_SECURE=true
+#
+# 个人 outlook.com / hotmail.com（要开两步验证后生成"应用密码"）
+# SMTP_SERVICE=Hotmail            # → smtp-mail.outlook.com:587 STARTTLS
+# SMTP_USER=you@outlook.com
+# SMTP_PASS=<应用密码>
+#
+# ⚠️ 工作/学校的 Microsoft 365 **不行**：Exchange Online 从 2026-04-30 起
+#    全部拒绝 SMTP 基本认证（550 5.7.30），只剩 OAuth，而 Waline 只支持
+#    用户名+密码。详见 blog-enter/ADMIN.md 第 8.3.1 节。
+#
+# ⚠️ 设了 SMTP_SERVICE 时，SMTP_HOST / SMTP_PORT / SMTP_SECURE 一律被忽略。
 # SENDER_NAME=SIMON 的个人站
-# SENDER_EMAIL=you@qq.com
-# AUTHOR_EMAIL=you@qq.com
+# SENDER_EMAIL=you@qq.com        # 必须与 SMTP_USER 相同
+# AUTHOR_EMAIL=you@qq.com        # 博主邮箱，接新评论通知
 EOF
 chmod 640 "$ENV_FILE"; chown root:blog "$ENV_FILE"
+fi
 
 echo "== 7. systemd unit =="
 cat > "$UNIT_FILE" <<EOF

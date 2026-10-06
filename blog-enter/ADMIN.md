@@ -215,6 +215,53 @@ Waline 的约定：**第一个注册的用户自动成为管理员**。所以顺
 验证码。顺序不能反 —— **先验通发信，再把 `LOGIN` 改成 `force`**，否则发不出信
 等于谁也评论不了。
 
+先把发信验通（脚本版，比手工敲 nodemailer 那段清楚）：
+
+```bash
+bash deploy/bin/check-waline-smtp.sh              # 只验连接 + 登录
+bash deploy/bin/check-waline-smtp.sh you@qq.com   # 再真发一封
+```
+
+它会打印 nodemailer 实际用的主机与端口、把口令只显示长度，并把常见失败翻译成
+人话（535 = 授权码/应用密码不对；`550 5.7.30` = Exchange Online 停用了基本认证；
+ETIMEDOUT = 端口不通；TLS 模式配反了……）。
+
+### 8.3.1 邮件服务商：Outlook 有两种命运，别选错那个
+
+| 你的邮箱 | 能不能给 Waline 用 | 怎么配 |
+| --- | --- | --- |
+| 个人 `@outlook.com` / `@hotmail.com` / `@live.com` | **能** | 开两步验证 → 账户「安全 → 高级安全选项 → 应用密码」生成一个，拿它当 `SMTP_PASS` |
+| 工作 / 学校的 Microsoft 365（含挂在 M365 上的自有域名） | **基本不能** | Exchange Online 已停用 SMTP 的**基本认证**（2026-03-01 起逐步拒绝、2026-04-30 起全部拒绝，报 `550 5.7.30 Basic authentication is not supported for Client Submission`），只剩 OAuth；而 Waline 只支持"用户名+密码"（源码里就是 `auth: { user, pass }`），**不支持 OAuth** |
+| QQ / 163 | 能 | 用**授权码**（不是登录密码），465 + SSL。`SMTP_SERVICE=QQ` / `163` |
+| 阿里云邮件推送 / SendGrid 之类 | 能，而且最稳 | 换成 `SMTP_HOST` + `SMTP_PORT`；代价是要先有一个能验证的发件域名 |
+
+个人 Outlook 就这两种写法，**二选一**：
+
+```ini
+# 写法一：用 nodemailer 的预设（推荐，省得记端口）
+SMTP_SERVICE=Hotmail            # 别名 Outlook / Outlook.com / Hotmail.com 都认
+SMTP_USER=you@outlook.com
+SMTP_PASS=<应用密码>
+
+# 写法二：显式写主机与端口
+SMTP_HOST=smtp-mail.outlook.com
+SMTP_PORT=587
+SMTP_SECURE=false
+```
+
+⚠️ **设了 `SMTP_SERVICE` 时，`SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` 全部被忽略** ——
+端口由 nodemailer 的预设决定（`Hotmail` → `smtp-mail.outlook.com:587`，STARTTLS）。
+两边都写、还写得不一样，症状就是"我明明改了端口，怎么没生效"。
+
+另外三条实测：
+
+* `SENDER_EMAIL` 必须与 `SMTP_USER` **相同** —— Microsoft 不允许用别的地址发信。
+* 这台服务器是阿里云 IP，Microsoft 可能把首次登录判成"异常活动"而拒绝（也可能
+  要你去账户里确认一次）。**先在服务器上把 verify 跑通**再切 `force`。
+  阿里云默认封 25 端口（实测确认），465/587 都通，Outlook 的 587 从这台机器可达。
+* 送达率：Outlook 发往 QQ/163 **很容易进垃圾箱**。如果读者主要是 QQ/163，
+  用 QQ/163 发反而更稳（同域投递几乎不会被判垃圾）。
+
 ### 8.4 评论是按 URL 绑的
 
 Waline 用 `path` 把评论绑到文章地址上，本站写死成 `/article.html?slug=<slug>`
