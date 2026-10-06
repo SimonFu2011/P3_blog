@@ -30,8 +30,13 @@ UMask=0077
 # --session-idle 120：纯 HTTP 阶段把空闲超时压到 2 小时。
 #   域名与证书就绪后，追加 --public-origin https://simonfu.xin 并把这里
 #   改成 720（12 小时）—— cookie 会自动带上 Secure，风险回到可接受水平。
+#
+# 【端口分工】本服务监听 8849；8848 留给 p3-admin-proxy（隧道入口）。
+#   为什么不让后台直接听 8848：管理面要求请求带 X-Admin-Proxy-Secret，
+#   而浏览器走 SSH 隧道时加不了自定义头，必须有反代替它注入。见
+#   deploy/systemd/p3-admin-proxy.service。
 ExecStart=/usr/local/bin/node /srv/blog/repo/blog-enter/server/dev-server.mjs \
-  --port 8848 \
+  --port 8849 \
   --remote \
   --public-host 43.108.100.116 \
   --public-host simonfu.xin \
