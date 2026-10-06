@@ -16,6 +16,16 @@
 window.POSTS = [
 
   {
+  slug: 'verify-image-post',
+  title: '图片保留验证',
+  date: '2026-10-06',
+  category: '测试',
+  tags: ['verify'],
+  excerpt: '验证图片不会再被发布流程删掉，并会自动同步到 GitHub。',
+  body: '<p>这条用来验证图片链路。</p>\n<img src="img/uploads/verify-image.png" alt="验证图片">'
+},
+
+  {
   slug: 'post-20261006',
   title: '无题',
   date: '2026-10-06',
