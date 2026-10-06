@@ -636,11 +636,21 @@ export const createApp = async (options) => {
     const path = url.pathname;
 
     /* 0) 所有请求都先过 反代密钥 / 对端 / Host / 同源 四道闸 */
+    /* 管理面 = 管理页与接口。反代密钥只约束这一部分。
+       ------------------------------------------------------------
+       为什么不能全局约束：远端模式下 --proxy-secret-file 是**硬性要求**，
+       而 nginx 会给它转发的每个请求注入那个密钥头。可一旦把密钥检查放在
+       每个请求上，**SSH 隧道就直接进不来了**（隧道没有 nginx，没有那个头），
+       而隧道恰恰是本项目在纯 HTTP 阶段唯一的零攻击面入口。
+       所以：管理面校验密钥（"只允许我们的 nginx 到达管理面"），
+       公开静态站点不校验（它本来就是给所有人看的，隧道/直连都该能取）。 */
+    const isAdminSurface = path.startsWith('/_admin') || path.startsWith('/api/');
+
     security.guard(req, {
       port: cfg.port,
       allowedHosts,
       allowedOrigins,
-      proxySecret: cfg.proxySecret
+      proxySecret: isAdminSurface ? cfg.proxySecret : null
     });
 
     const ctx = {

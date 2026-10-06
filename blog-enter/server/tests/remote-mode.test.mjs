@@ -135,7 +135,6 @@ const REMOTE = {
   trustProxy: true,
   autoPublish: false
 };
-
 /* 远端模式下的"正常浏览器请求"：密钥 + 白名单 Host + 白名单 Origin
    注意 origin 必须一起带上 —— 只带密钥会被 Origin 白名单拦成 403，
    验证"放行"类用例时不能漏。 */
@@ -147,6 +146,10 @@ const proxied = (extra) => Object.assign({
 
 /** 只带密钥、不带 Origin 的"非浏览器客户端"请求（curl 就是这种） */
 const noOrigin = (extra) => Object.assign({ 'x-admin-proxy-secret': SECRET }, extra || {});
+
+/** **完全不带反代密钥**的请求：用来验证"没有 nginx 就进不了管理面"。
+    注意别和 noOrigin 混用 —— 那个是带密钥的。 */
+const noSecret = (extra) => Object.assign({}, extra || {});
 
 /* ============================================================
    1. 远端模式下，未认证的读请求一律被拒（草稿不再泄露）
@@ -429,6 +432,25 @@ test('本地模式不要求密钥（未配置时行为不变）', async () => {
     const res = await req(base, '/api/session', { headers: { host: '127.0.0.1:' + 0 } });
     /* Host 端口需要匹配真实端口，这里只断言"不是因为缺密钥而被拒" */
     assert.notEqual(res.status, 0);
+  } finally { await sb.cleanup(); }
+});
+
+test('远端：反代密钥只约束管理面，公开静态站点不受影响', async () => {
+  const sb = await makeSandbox();
+  try {
+    await setPassphrase(join(sb.root, '.admin'), PASS);
+    const { base } = await sb.start(REMOTE);
+
+    /* 管理面：没有密钥必须 403（证明"只有我们的 nginx 能到管理面"） */
+    const admin = await req(base, '/api/session', { headers: noSecret() });
+    assert.equal(admin.status, 403, '管理面缺密钥必须 403，实际 ' + admin.status);
+    const adminUi = await req(base, '/_admin/', { headers: noSecret() });
+    assert.equal(adminUi.status, 403, '管理页缺密钥必须 403，实际 ' + adminUi.status);
+
+    /* 公开静态站点：没有密钥也必须能取 —— 否则 SSH 隧道（纯 HTTP 阶段唯一的
+       零攻击面入口）就直接不可用，而它本来就是给所有人看的页面。 */
+    const site = await req(base, '/index.html', { headers: noSecret() });
+    assert.equal(site.status, 200, '公开静态站点不应要求反代密钥（实际 ' + site.status + '）');
   } finally { await sb.cleanup(); }
 });
 
