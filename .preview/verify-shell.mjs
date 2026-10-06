@@ -165,12 +165,19 @@ const PROBE = `(function(){
     overflowBody: document.body.scrollWidth - window.innerWidth,
     stats: stats ? {
       visible: vis(stats), hidden: stats.hidden,
+      inNav: !!(stats.closest && stats.closest('.nav')),
       keys: Array.prototype.map.call(stats.querySelectorAll('.stat'), function (s) {
         return { k: s.querySelector('.stat-k').textContent, v: s.querySelector('.stat-v').textContent }; }),
       src: (stats.querySelector('[data-stat-src]') || {}).textContent || '',
-      rect: r(stats)
+      mainFont: parseFloat(getComputedStyle(stats.querySelector('.stat.is-main .stat-v')).fontSize) || 0,
+      subFont: (function () { var s = stats.querySelectorAll('.stat:not(.is-main) .stat-v');
+        return s.length ? parseFloat(getComputedStyle(s[0]).fontSize) : 0; })(),
+      rect: r(stats),
+      noise: stats.classList.contains('is-noise')
     } : null,
     footRect: r(foot),
+    navRect: r(nav),
+    navFootRect: r(q('.nav .nav-foot')),
     storage: (function () { try { return localStorage.getItem('p3.shell.nav'); } catch (e) { return 'ERR'; } })(),
     w0: window.__w0,
     errs: 0
@@ -351,48 +358,148 @@ if (statsSrc === 'remote') {
   const total2 = Number(String(p.stats.keys[0].v).replace(/,/g, ''));
   ok('刷新一次总访问量 +1（本机 PV 计数）', total2 === total1 + 1, total1 + ' → ' + total2);
 }
-ok('统计条在页脚上方、不与页脚重叠', p.stats.rect.b <= p.footRect.t + 1,
-  'stats.b=' + p.stats.rect.b + ' foot.t=' + p.footRect.t);
+ok('在侧边栏下部：位于 .nav 内、且排在 .nav-foot 之前',
+  p.stats.inNav === true && p.navFootRect && p.stats.rect.b <= p.navFootRect.t + 1,
+  JSON.stringify({ inNav: p.stats.inNav, statsB: p.stats.rect.b, footT: p.navFootRect && p.navFootRect.t }));
+ok('主指标明显更大（总访问量字号 > 其余两项）',
+  p.stats.mainFont >= 22 && p.stats.mainFont > p.stats.subFont + 4,
+  'main=' + p.stats.mainFont + 'px sub=' + p.stats.subFont + 'px');
+
+/* 侧边栏只有 ~235px 可用内容宽：这一块必须连**内部元素**都不越界
+   （测的是每个后代的最右边缘，不是外层盒子的宽 —— 盒子内溢出一样是问题） */
+const fit = await js(`(function(){
+  var s = document.querySelector('[data-stats]'); var nav = document.querySelector('.nav');
+  var sr = s.getBoundingClientRect(); var nr = nav.getBoundingClientRect();
+  var worst = 0; var who = '';
+  Array.prototype.forEach.call(s.querySelectorAll('*'), function (el) {
+    var r = el.getBoundingClientRect();
+    if (r.width && r.right > worst) { worst = r.right; who = String(el.className || el.tagName); }
+  });
+  return { boxR: Math.round(sr.right), boxW: Math.round(sr.width),
+    navR: Math.round(nr.right), navL: Math.round(nr.left),
+    contentL: Math.round(nr.left + parseFloat(getComputedStyle(nav).paddingLeft)),
+    worstR: Math.round(worst), worstEl: who,
+    srcR: Math.round(s.querySelector('[data-stat-src]').getBoundingClientRect().right) };
+})()`);
+ok('统计块（含内部元素）不越过侧边栏右边界',
+  fit.worstR <= fit.navR + 1 && fit.boxR <= fit.navR + 1, JSON.stringify(fit));
+
+/* 悬停"乱码 1 秒再落定"：这是本轮的新交互，得真派发鼠标事件验，而不是看类名 */
+const before = await js(`(function(){ var s = document.querySelector('[data-stats]');
+  var b = s.getBoundingClientRect();
+  return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2),
+    vals: Array.prototype.map.call(s.querySelectorAll('.stat-v'), function (v) { return v.textContent; }) }; })()`);
+await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x: before.x, y: before.y });
+await sleep(260);
+const noise = await js(`(function(){ var s = document.querySelector('[data-stats]');
+  return { on: s.classList.contains('is-noise'),
+    vals: Array.prototype.map.call(s.querySelectorAll('.stat-v'), function (v) { return v.textContent; }),
+    aria: Array.prototype.map.call(s.querySelectorAll('.stat-v'), function (v) { return v.getAttribute('aria-hidden'); }) }; })()`);
+ok('悬停后先进入乱码：值不等于真值、且标了 aria-hidden（读屏不念随机数）',
+  noise.on === true && JSON.stringify(noise.vals) !== JSON.stringify(before.vals)
+  && noise.aria.every((a) => a === 'true'),
+  JSON.stringify(noise));
+await sleep(1200);
+const noiseSettled = await js(`(function(){ var s = document.querySelector('[data-stats]');
+  return { on: s.classList.contains('is-noise'),
+    vals: Array.prototype.map.call(s.querySelectorAll('.stat-v'), function (v) { return v.textContent; }),
+    aria: Array.prototype.map.call(s.querySelectorAll('.stat-v'), function (v) { return v.getAttribute('aria-hidden'); }) }; })()`);
+ok('约 1 秒后落定回真值，且 aria-hidden 摘掉',
+  noiseSettled.on === false && JSON.stringify(noiseSettled.vals) === JSON.stringify(before.vals)
+  && noiseSettled.aria.every((a) => a === null),
+  JSON.stringify(noiseSettled) + ' vs ' + JSON.stringify(before.vals));
 
 /* ------------------------------------------------------------
    D. 标签云（archive.html）
    ------------------------------------------------------------ */
-section('D. 标签云（archive.html）');
+section('D. 词云（archive.html）');
 await goto('/archive.html');
 const cloud = await js(`(function(){
-  var tags = Array.prototype.slice.call(document.querySelectorAll('#tagCloud .tc-tag'));
-  var sizes = tags.map(function (t) { return { name: t.querySelector('.tc-name').textContent,
-    n: Number(t.querySelector('.tc-n').textContent), fs: parseFloat(getComputedStyle(t).fontSize),
-    heat: t.dataset.heat || '' }; });
-  var named = sizes.filter(function (s) { return s.name !== '全部'; });
-  var hot = named.slice().sort(function (a, b) { return b.n - a.n; })[0];
-  var cold = named.slice().sort(function (a, b) { return a.n - b.n; })[0];
+  var host = document.querySelector('#tagCloud');
+  var tags = Array.prototype.slice.call(host.querySelectorAll('.tc-tag'));
+  var cont = host.getBoundingClientRect();
+  var rects = tags.map(function (t) { var b = t.getBoundingClientRect();
+    return { name: t.querySelector('.tc-name').textContent, n: Number(t.querySelector('.tc-n').textContent),
+      fs: parseFloat(getComputedStyle(t).fontSize), heat: t.dataset.heat || '',
+      left: t.style.left, top: t.style.top,
+      l: b.left, t2: b.top, r: b.right, b2: b.bottom, w: b.width, h: b.height }; });
+  /* 视觉矩形两两相交检查：词云一旦重叠，可读性与可点性同时崩 */
+  var overlaps = [];
+  for (var i = 0; i < rects.length; i++) for (var j = i + 1; j < rects.length; j++) {
+    var a = rects[i]; var c = rects[j];
+    var ox = Math.min(a.r, c.r) - Math.max(a.l, c.l);
+    var oy = Math.min(a.b2, c.b2) - Math.max(a.t2, c.t2);
+    if (ox > 1.5 && oy > 1.5) overlaps.push(a.name + '×' + c.name + '=' + Math.round(ox) + '×' + Math.round(oy));
+  }
+  var minL = Math.min.apply(null, rects.map(function (r) { return r.l; }));
+  var minT = Math.min.apply(null, rects.map(function (r) { return r.t2; }));
+  var maxR = Math.max.apply(null, rects.map(function (r) { return r.r; }));
+  var maxB = Math.max.apply(null, rects.map(function (r) { return r.b2; }));
+  var outside = rects.filter(function (r) {
+    return r.l < cont.left - 1.5 || r.t2 < cont.top - 1.5 || r.r > cont.right + 1.5 || r.b2 > cont.bottom + 1.5; }).length;
+  var inner = host.querySelector('.cloud-inner');
+  var zoom = 1;
+  if (inner) {
+    var m = /matrix\(([^)]+)\)/.exec(getComputedStyle(inner).transform);
+    if (m) zoom = parseFloat(m[1].split(',')[0]) || 1;
+  }
+  var sorted = rects.slice().sort(function (a, b) { return b.n - a.n; });
+  var hot = sorted[0]; var cold = sorted[sorted.length - 1];
   var totals = window.Archive.totals();
-  return { count: tags.length, first: tags[0].className, firstText: tags[0].querySelector('.tc-name').textContent,
-    allN: Number(tags[0].querySelector('.tc-n').textContent), sizes: sizes, hot: hot, cold: cold,
+  return { count: tags.length, chipTags: document.querySelectorAll('#tagChips .chip').length - 1,
+    allN: Number((document.querySelector('#cloudAll .tc-n') || {}).textContent || -1),
+    allInside: !document.querySelector('#tagCloud .tc-all'),
+    sizes: rects.map(function (r) { return { name: r.name, n: r.n, fs: r.fs, heat: r.heat, left: r.left, top: r.top }; }),
+    hot: { name: hot.name, n: hot.n, fs: hot.fs }, cold: { name: cold.name, n: cold.n, fs: cold.fs },
+    overlaps: overlaps, outside: outside, zoom: Math.round(zoom * 100) / 100,
+    fillW: Math.round(((maxR - minL) / cont.width) * 100) / 100,
+    fillH: Math.round(((maxB - minT) / cont.height) * 100) / 100,
+    contDetected: cont.width > 50 && cont.height > 50,
     total: totals.total, shown: totals.shown,
     cards: document.querySelectorAll('#postList .post-card').length,
+    twoCol: (function () { var f = document.querySelector('.filters');
+      return f ? getComputedStyle(f).gridTemplateColumns.split(' ').length : 0; })(),
+    cloudRightOfChips: (function () {
+      var pane = document.querySelector('.filter-pane'); var box = document.querySelector('#cloudBox');
+      if (!pane || !box) return false;
+      var a = pane.getBoundingClientRect(); var c = box.getBoundingClientRect();
+      return c.left >= a.right - 2; })(),
     hskip: (function () { var hs = Array.prototype.map.call(document.querySelectorAll('h1,h2,h3'),
         function (h) { return Number(h.tagName.slice(1)); });
       for (var i = 1; i < hs.length; i++) { if (hs[i] - hs[i-1] > 1) return true; } return false; })(),
     secHeads: document.querySelectorAll('#listSection .section-head .section-num').length,
     inlineMargin: !!document.querySelector('#listSection').getAttribute('style') };
 })()`);
-ok('标签云渲染出来了（标签数 + 1 个"全部"）', cloud.count >= 2 && cloud.firstText === '全部' && cloud.allN === cloud.total,
-  JSON.stringify({ count: cloud.count, allN: cloud.allN, total: cloud.total }));
-ok('"全部"的篇数 = 全部文章数', cloud.allN === cloud.total);
-ok('字号随热度单调（最热 > 最冷）', cloud.hot && cloud.cold && cloud.hot.fs - cloud.cold.fs >= 2,
+ok('词云的词数 = 标签数（"全部"不在云里）',
+  cloud.count >= 2 && cloud.count === cloud.chipTags && cloud.allInside === true,
+  JSON.stringify({ count: cloud.count, chipTags: cloud.chipTags, allInside: cloud.allInside }));
+ok('"全部"在抬头行，篇数 = 全部文章数', cloud.allN === cloud.total, cloud.allN + ' vs ' + cloud.total);
+ok('版式：筛选区两列，词云在分类/标签的右侧',
+  cloud.twoCol === 2 && cloud.cloudRightOfChips === true,
+  JSON.stringify({ twoCol: cloud.twoCol, right: cloud.cloudRightOfChips }));
+ok('词是绝对定位排布的（不是换行流）——每个词都有算出来的 left/top',
+  cloud.sizes.every((s) => /^\d+px$/.test(s.left) && /^\d+px$/.test(s.top)),
+  JSON.stringify(cloud.sizes.slice(0, 3)));
+ok('词之间零重叠（碰撞检测生效）', cloud.overlaps.length === 0, cloud.overlaps.join(' | '));
+ok('所有词都在容器内（含整层缩放后）', cloud.outside === 0 && cloud.contDetected === true,
+  'outside=' + cloud.outside);
+ok('整朵云铺满容器（长或宽至少填到 90%）',
+  Math.max(cloud.fillW, cloud.fillH) >= 0.9 && cloud.fillW <= 1.02 && cloud.fillH <= 1.02,
+  'zoom=' + cloud.zoom + ' fillW=' + cloud.fillW + ' fillH=' + cloud.fillH);
+ok('字号随热度单调（最热 > 最冷）', cloud.hot.fs - cloud.cold.fs >= 4,
   JSON.stringify({ hot: cloud.hot, cold: cloud.cold }));
 ok('热度分档（hot/warm/cool 至少出现两档）',
-  new Set(cloud.sizes.filter((s) => s.name !== '全部').map((s) => s.heat)).size >= 2,
+  new Set(cloud.sizes.map((s) => s.heat)).size >= 2,
   JSON.stringify(cloud.sizes.map((s) => s.name + ':' + s.heat)));
 ok('两页的小节编号风格一致（归档有小节头 01/02）', cloud.secHeads === 1 && cloud.inlineMargin === false);
 ok('归档页标题层级没有跳级', cloud.hskip === false);
 
-/* 点最热的标签 */
+/* 点最热的词：先聚焦再点。因为不再重建 DOM，焦点本来就该原地不动
+   （旧实现是"重画之后再把焦点 focus 回去"） */
 const hotName = cloud.hot.name;
 await js(`(function(){ var t = Array.prototype.filter.call(document.querySelectorAll('#tagCloud .tc-tag'),
-  function (x) { return x.querySelector('.tc-name').textContent === ${JSON.stringify(hotName)}; })[0]; t.click(); })(); true`);
+  function (x) { return x.querySelector('.tc-name').textContent === ${JSON.stringify(hotName)}; })[0];
+  t.focus(); t.click(); })(); true`);
 await sleep(350);
 const afterClick = await js(`(function(){
   var t = Array.prototype.filter.call(document.querySelectorAll('#tagCloud .tc-tag'),
@@ -402,14 +509,19 @@ const afterClick = await js(`(function(){
   return { pressed: t.getAttribute('aria-pressed'), chipPressed: chip ? chip.getAttribute('aria-pressed') : null,
     active: document.activeElement === t, cards: document.querySelectorAll('#postList .post-card').length,
     count: document.querySelector('#filterCount').textContent,
+    pos: Array.prototype.map.call(document.querySelectorAll('#tagCloud .tc-tag'),
+      function (x) { return x.style.left + ',' + x.style.top; }).join('|'),
     url: location.search, resetDisabled: document.querySelector('#filterReset').disabled };
 })()`);
-ok('点击标签后该标签为选中态，且与胶囊同步',
+ok('点击词后该标签为选中态，且与胶囊同步',
   afterClick.pressed === 'true' && afterClick.chipPressed === 'true', JSON.stringify(afterClick));
-ok('筛出的文章数 = 该标签的篇数', afterClick.cards === cloud.hot.n,
+ok('筛出的文章数 = 该词的篇数', afterClick.cards === cloud.hot.n,
   'cards=' + afterClick.cards + ' expect=' + cloud.hot.n);
 ok('筛选状态写进 URL', afterClick.url.indexOf('tag=') >= 0, afterClick.url);
-ok('键盘焦点回到被点的标签（重画后不掉焦点）', afterClick.active === true);
+ok('键盘焦点仍在被点的那一枚上（不再重建 DOM，所以不会掉）', afterClick.active === true);
+ok('点词不会让整朵云重排（位置逐字节不变）',
+  afterClick.pos === cloud.sizes.map((s) => s.left + ',' + s.top).join('|'),
+  '重排了：位置发生了变化');
 ok('计数提示同步', /命中/.test(afterClick.count), afterClick.count);
 
 /* 悬停反馈：派发真实鼠标移动，比对颜色与位移。
@@ -417,12 +529,11 @@ ok('计数提示同步', /命中/.test(afterClick.count), afterClick.count);
      · html 上有 scroll-behavior: smooth —— scrollIntoView 会**动画**滚动，
        在同一个 evaluate 里量坐标会量到滚动前的位置，鼠标就落空了；
        这里拆成"先滚、等停、再量、再移"四步。
-     · 要挑一枚**未选中**的标签：选中样式（.tc-tag[aria-pressed="true"]）
+     · 要挑一枚**未选中**的词：选中样式（.tc-tag[aria-pressed="true"]）
        与 :hover 同权重、且在文件里更靠后，本来就该盖住悬停色 ——
-       拿一枚已选中的标签去测悬停，测到的是选中色，不是悬停色。
-*/
+       拿一枚已选中的词去测悬停，测到的是选中色，不是悬停色。 */
 const HOVER_SEL = `Array.prototype.filter.call(document.querySelectorAll('#tagCloud .tc-tag'),
-  function (x) { return x.getAttribute('aria-pressed') !== 'true' && !x.classList.contains('tc-all'); })[0]`;
+  function (x) { return x.getAttribute('aria-pressed') !== 'true'; })[0]`;
 await js(`(function(){ var t = ${HOVER_SEL}; if (t) t.scrollIntoView({ block: 'center', behavior: 'instant' }); })(); true`);
 await sleep(420);
 const hoverBefore = await js(`(function(){ var t = ${HOVER_SEL}; var b = t.getBoundingClientRect(); var cs = getComputedStyle(t);
@@ -438,23 +549,22 @@ ok('悬停有明显反馈（颜色变 + 抬起 2px）',
   hoverAfter.color !== hoverBefore.color && /matrix\(1, 0, 0, 1, 0, -2\)/.test(hoverAfter.transform),
   hoverBefore.name + '：' + hoverBefore.color + '/' + hoverBefore.transform + ' → ' + hoverAfter.color + '/' + hoverAfter.transform);
 
-/* 点"全部"恢复完整列表 */
-await js(`document.querySelector('#tagCloud .tc-all').click(); true`);
+/* 点抬头行的"全部"恢复完整列表 */
+await js(`document.querySelector('#cloudAll').click(); true`);
 await sleep(350);
 const afterAll = await js(`(function(){
   return { cards: document.querySelectorAll('#postList .post-card').length,
     pressed: document.querySelectorAll('#tagCloud .tc-tag[aria-pressed="true"]').length,
-    allText: document.querySelector('#tagCloud .tc-all').getAttribute('aria-pressed'),
+    allText: document.querySelector('#cloudAll').getAttribute('aria-pressed'),
     count: document.querySelector('#filterCount').textContent,
     resetDisabled: document.querySelector('#filterReset').disabled,
     url: location.search };
 })()`);
 ok('点"全部"恢复完整列表', afterAll.cards === cloud.total && afterAll.count.indexOf('共') >= 0,
   JSON.stringify({ cards: afterAll.cards, total: cloud.total, count: afterAll.count }));
-ok('"全部"为选中态、其余标签都不选中', afterAll.allText === 'true' && afterAll.pressed === 1,
+ok('"全部"为选中态、其余词都不选中', afterAll.allText === 'true' && afterAll.pressed === 0,
   JSON.stringify(afterAll));
 ok('"全部"把 URL 也清干净了', afterAll.url === '', afterAll.url);
-
 /* ------------------------------------------------------------
    E. 首屏（index.html）：入场隐藏、入水后淡入、不压其它角标
    ------------------------------------------------------------ */

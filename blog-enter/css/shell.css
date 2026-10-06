@@ -308,6 +308,57 @@ body.skin-deep {
 }
 .stats-src { margin-left: auto; font-size: 10.5px; letter-spacing: .12em; color: var(--ui-mute-2); }
 
+/* ---- 侧边栏下部的那一块（内页用；比原来页脚上那一行明显得多）----
+   版式：抬头一行（VISITS + 来源），主数字独占一行且放大，另两个指标并排。
+   交互：鼠标移上去整块先"乱码"约 1 秒再落定到真值（实现见 js/shell.js 的
+   scrambleStats）。乱码期间数字换成青色，读完恢复正常色 —— 这是"正在读取"
+   的视觉说法，不是报错，所以不用红色。 */
+.nav .stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin-top: clamp(14px, 2.4vh, 26px);
+  padding: 14px 0 0;
+  border-top: var(--ui-hair) solid var(--ui-line-2);
+  border-bottom: 0;
+  font-size: var(--ui-fs-xs);
+  cursor: default;
+}
+.nav .stats-kicker { grid-column: 1; }
+.nav .stats-src { grid-column: 2; margin-left: 0; text-align: right; }
+.nav .stats-list {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px 14px;
+  margin: 6px 0 0;
+}
+.nav .stat { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+/* 主指标：标签在上、数字在下，整行独占 */
+.nav .stat.is-main { grid-column: 1 / -1; display: grid; gap: 1px; }
+.nav .stat-v { font-size: 15px; }
+.nav .stat.is-main .stat-v {
+  font-size: clamp(24px, 2.5vw, 30px);
+  line-height: 1.06;
+  letter-spacing: .01em;
+}
+.nav .stat.is-main .stat-v::before {
+  content: "";
+  display: inline-block;
+  width: 11px; height: 2px;
+  margin-right: 9px;
+  background: var(--ui-accent);
+  transform: skewX(-16deg) translateY(-.42em);
+}
+/* 乱码中：数字转青、抬头转红，读完自动恢复 */
+.nav .stats.is-noise .stat-v { color: var(--ui-cyan); }
+.nav .stats.is-noise .stats-kicker { color: var(--ui-accent); }
+/* 收起成图标栏时放不下这一块：不塞进去（那一档是 76px，只有导航图标） */
+@media (min-width: 981px) {
+  html[data-nav="collapsed"] .nav .stats { display: none; }
+}
+
 .world .stats {
   position: absolute;
   left: clamp(18px, 3.2vw, 56px);
@@ -319,47 +370,86 @@ body.skin-deep {
   gap: 6px 16px;
   opacity: 0;
   transition: opacity .6s ease;
-  /* 它只是"读一眼"的信息，不参与命中：扇形菜单与时钟的点击一概不受影响 */
-  pointer-events: none;
+  cursor: default;
 }
 .world .stats .stats-list { gap: 6px 16px; }
 .world .stats .stat-v { font-size: 13.5px; }
+.world .stats.is-noise .stat-v { color: var(--ui-cyan); }
 body.is-underwater .world .stats,
 body.is-settled .world .stats { opacity: .92; }
 
 /* ------------------------------------------------------------
-   3. 标签云（归档页）
+   3. 词云（归档页）
    ------------------------------------------------------------
    热度 = 该标签下的文章数（0~1 归一化，由 archive.js 写成 --heat）。
-   字号连续：--tc-min + --heat × --tc-range（两端由 CSS 定，脚本只给热度）。
-   颜色分三档：CSS 没办法对变量做区间判断，而"三档色 + 连续字号"已经足够
+   字号连续：(--tc-min + --heat × --tc-range) × --tc-scale ——
+   最后那个 --tc-scale 是排布时的缩放档位，只有"摆不下"才会小于 1
+   （算法与重排时机见 js/archive.js 的 packCloud）。
+   颜色分三档：CSS 没法对变量做区间判断，而"三档色 + 连续字号"已经足够
    表达热度，也更好控制对比度（热度越低越接近 --ui-mute，越高越接近正文色）。
+
+   版式：筛选区是两列 —— 左列是分类/标签的精确开关，右列是这朵云。
+   词是**绝对定位**的：位置由脚本用"中心螺旋 + 矩形碰撞"算出来，
+   所以这里只需要给容器一个确定的盒子（宽高都要能被量到）。
    ------------------------------------------------------------ */
-.filter-row-cloud { align-items: flex-start; }
+.filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.02fr);
+  gap: clamp(16px, 2.2vw, 30px) clamp(18px, 2.6vw, 36px);
+  align-items: start;
+}
+.filter-pane { display: grid; gap: 14px; min-width: 0; }
+/* 辅助行（计数 / 视图切换 / 清空）横跨两列 */
+.chip-row-aux { grid-column: 1 / -1; }
+
+.cloud-box { display: grid; gap: 8px; min-width: 0; }
+.cloud-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.cloud-note {
+  margin-left: auto;
+  font-size: 10.5px; letter-spacing: .12em;
+  color: var(--ui-mute-2);
+}
+
 .tagcloud {
-  --tc-min: 13px;
-  --tc-range: 17px;
-  display: flex; flex-wrap: wrap; align-items: baseline;
-  /* 行距给 2px 就够：每一枚自己已经有 6px 的上下内距（那是点击目标），
-     两者相加才是眼睛看到的间距 —— 写 6px 会显得云朵散开 */
-  gap: 2px clamp(10px, 1.5vw, 20px);
-  min-width: 0;
+  /* 字号跨度刻意拉大（12 → 44px，约 3.7:1）：参考图里最大的词几乎顶到
+     上下边缘、最小的词只有它的三分之一，这个对比度才是"词云"的观感。
+     实际大小还要乘上排布后的整层缩放（--tc-scale 与 .cloud-inner 的 transform）。 */
+  --tc-min: 12px;
+  --tc-range: 32px;
+  position: relative;
+  /* 高度必须能被量到：排布算法读的是 clientWidth/clientHeight。
+     2:1 左右最像参考图那种填满的矩形 */
+  height: clamp(200px, 26vh, 280px);
+  overflow: hidden;
+  border-top: var(--ui-hair) solid var(--ui-line);
+  border-bottom: var(--ui-hair) solid var(--ui-line);
+}
+/* 词的容器层：排布时用"自然坐标"，最后整层等比缩放 + 居中铺满上面的盒子。
+   放在内层是为了不和词自己的悬停位移打架（词的 transform 是词的，
+   整块的缩放是这一层的）。transform-origin 必须在左上角，否则
+   translate 的换算要重来一遍。 */
+.cloud-inner {
+  position: absolute; left: 0; top: 0;
+  transform-origin: 0 0;
 }
 .tc-tag {
   --heat: 0;
-  display: inline-flex; align-items: baseline; gap: 6px;
-  /* 内距不只是好看：标签云里每一枚都是可点目标，必须满足 WCAG 2.2 的目标尺寸下限
-     （24×24 CSS px）。原来写成 2px 4px 时最冷的那一档实测只有 43×20 ——
-     拇指点不中，自动化体检也会把它列出来。现在最小的那一档约 28px 高。 */
-  padding: 6px 9px;
-  min-height: 28px;
+  --tc-scale: 1;
+  /* 绝对定位 + 由脚本写 left/top：这是词云与"标签行"的本质区别 */
+  position: absolute; left: 0; top: 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  white-space: nowrap;
+  /* 内距不只是好看：每个词都是可点目标，必须满足 WCAG 2.2 的目标尺寸下限
+     （24×24 CSS px）。缩到最小档时字号 12px 上下，靠 min-height 兜住高度。 */
+  padding: 2px 4px;
+  min-height: 24px;
   border: 0;
   border-radius: var(--ui-r-card);
   background: none;
   font-family: var(--font-jp);
-  font-size: calc(var(--tc-min) + var(--heat) * var(--tc-range));
-  line-height: 1.2;
-  letter-spacing: .015em;
+  font-size: calc((var(--tc-min) + var(--heat) * var(--tc-range)) * var(--tc-scale));
+  line-height: 1.1;
+  letter-spacing: .01em;
   color: var(--ui-mute);
   cursor: pointer;
   transition: color .18s ease, background .18s ease, transform .2s var(--ui-ease);
@@ -368,34 +458,57 @@ body.is-settled .world .stats { opacity: .92; }
 .tc-tag[data-heat="hot"] { color: var(--ui-fg); }
 .tc-n {
   font-family: var(--font-num);
-  font-size: .56em; letter-spacing: .04em;
+  font-size: .58em; letter-spacing: .04em;
   color: var(--ui-mute-2);
   transition: color .18s ease;
 }
-/* 悬停：整枚抬起来 + 让位给重音色 —— 标签云里"能点"必须一眼看出来 */
-.tc-tag:hover { color: var(--ui-accent); background: var(--ui-panel-2); transform: translateY(-2px); }
+/* 悬停：整枚抬起来 + 让位给重音色 —— 词云里"能点"必须一眼看出来 */
+.tc-tag:hover { color: var(--ui-accent); background: var(--ui-panel-2); transform: translateY(-2px); z-index: 2; }
 .tc-tag:hover .tc-n { color: var(--ui-accent); }
-.tc-tag:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
-/* 选中：反色底 + 下沿一条重音线。刻意不用胶囊的"整块反色"——
-   那样会和上面的分类 / 标签胶囊混成同一层级 */
+.tc-tag:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; z-index: 3; }
+/* 选中：浅底 + 下沿一条重音线。刻意不用胶囊的"整块反色"——
+   那样会和左列的分类 / 标签胶囊混成同一层级 */
 .tc-tag[aria-pressed="true"] {
   color: var(--ui-fg);
   background: var(--ui-panel-2);
   box-shadow: inset 0 -2px 0 var(--ui-accent);
 }
 .tc-tag[aria-pressed="true"] .tc-n { color: var(--ui-accent); }
-/* "全部"：不按热度缩放，固定字号 + 红斜线，作为"清空所有筛选"的落点 */
+
+/* 兜底行：容器太窄时摆不下的词退到这里（仍然可点，不会被藏起来） */
+.cloud-rest {
+  display: flex; flex-wrap: wrap; gap: 2px 10px;
+  padding-top: 6px;
+}
+.cloud-rest[hidden] { display: none; }
+.cloud-rest .tc-tag {
+  position: static;
+  font-size: calc(var(--tc-min) * var(--tc-scale, 1));
+}
+
+/* 词云抬头那个"全部"：不按热度缩放，固定字号 + 红斜线 */
 .tc-all {
-  font-size: calc(var(--tc-min) + 3px);
-  font-weight: 700; letter-spacing: .1em;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px;
+  min-height: 24px;
+  border: 0; border-radius: var(--ui-r-card);
+  background: none;
+  font-family: var(--font-jp);
+  font-size: var(--ui-fs-sm); font-weight: 700; letter-spacing: .1em;
   color: var(--ui-fg-2);
+  cursor: pointer;
+  transition: color .18s ease, background .18s ease;
 }
 .tc-all::before {
-  content: ""; align-self: center;
+  content: "";
   width: 12px; height: 2px;
   background: var(--ui-accent);
   transform: skewX(-16deg);
 }
+.tc-all:hover { color: var(--ui-accent); background: var(--ui-panel-2); }
+.tc-all:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
+.tc-all[aria-pressed="true"] { color: var(--ui-fg); box-shadow: inset 0 -2px 0 var(--ui-accent); }
+.tc-all .tc-n { font-size: 11px; }
 
 /* ------------------------------------------------------------
    4. 统一表：同一角色的元素在两页必须同字号 / 同圆角
@@ -419,16 +532,22 @@ body.is-settled .world .stats { opacity: .92; }
 @media (max-width: 980px) {
   /* 抽屉档：收起按钮、图标栏、品牌缩写都不参与（这一档由 MENU 负责） */
   .nav-rail, .nl-ic, .nav-brand-mark { display: none; }
-  .stats { gap: 6px 16px; }
-  /* 数据来源换行，别把三个数字挤成两行 */
-  .stats-src { margin-left: 0; width: 100%; }
+  /* 侧边栏那一块统计跟着抽屉一起收放（与 .nav-list / .nav-foot 同一套规则） */
+  .nav .stats { display: none; }
+  body.is-nav-open .nav .stats { display: grid; margin-top: 4px; }
+  /* 词云排到开关下面：两列在窄屏会把词挤成一条线 */
+  .filters { grid-template-columns: minmax(0, 1fr); }
+  .tagcloud { height: clamp(190px, 28vh, 240px); }
+  .world .stats { gap: 6px 16px; }
+  .world .stats .stats-src { margin-left: 0; width: 100%; }
 }
 @media (max-width: 620px) {
-  .tagcloud { --tc-min: 12px; --tc-range: 10px; }
-  .stats { padding: 12px 2px; }
-  /* 窄屏只留数字：英文抬头那 60px 会让三个数字被挤到第二行 */
-  .stats-kicker { display: none; }
+  .tagcloud { --tc-min: 12px; --tc-range: 18px; height: 200px; }
+  /* 窄屏抬头只留"标签云 + 全部"，那句说明让位给词本身 */
+  .cloud-note { display: none; }
   .world .stats { left: 16px; right: 16px; bottom: 16px; }
+  /* 窄屏只留数字：英文抬头那 60px 会让三个数字被挤到第二行 */
+  .world .stats .stats-kicker { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

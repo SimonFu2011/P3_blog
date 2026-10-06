@@ -164,19 +164,26 @@
 
   const paint = (box, mode, nums) => {
     statsSource = mode;
+    /* 作废正在跑的乱码动画：新数字已经画上去了，不能再被旧动画覆盖 */
+    scrambleGen += 1;
+    box.classList.remove('is-noise');
     const slots = SLOTS[mode] || SLOTS.local;
     const list = box.querySelector('.stats-list');
     list.textContent = '';
     slots.forEach((slot) => {
       const cell = doc.createElement('div');
-      cell.className = 'stat';
+      /* 总访问量是主指标：留一个 is-main 给 CSS 放大（侧边栏那一块靠它撑气势） */
+      cell.className = slot[0] === 'total' ? 'stat is-main' : 'stat';
       const k = doc.createElement('dt');
       k.className = 'stat-k';
       k.textContent = slot[1];
       const v = doc.createElement('dd');
       v.className = 'stat-v';
       v.setAttribute('data-stat', slot[0]);
-      v.textContent = fmt(nums[slot[0]]);
+      const text = fmt(nums[slot[0]]);
+      v.textContent = text;
+      /* 真值单独存一份：乱码动画结束后要落回它，而且必须与当前显示的数字一致 */
+      v.dataset.value = text;
       cell.appendChild(k);
       cell.appendChild(v);
       list.appendChild(cell);
@@ -186,17 +193,99 @@
     box.hidden = false;
   };
 
+  /* ------------------------------------------------------------
+     悬停"乱码 1 秒再落定"
+     ------------------------------------------------------------
+     网友对"访问量"这类数字的期待是"它在动/它在读"：鼠标移上去先抖成乱码，
+     一秒后逐位锁定到真值。实现上只动**显示**，不动数据：
+       · 真值一直存在 .stat-v 的 data-value 里，落定时原样写回；
+       · 乱码期间给 .stat-v 加 aria-hidden（读屏不该念一串随机数字），
+         整块的 aria-label 仍是真值；
+       · 乱码中途若发生重绘（后端数字回来了），代数计数让它立刻作废；
+       · prefers-reduced-motion 下完全不抖，直接显示真值。
+     ------------------------------------------------------------ */
+  const NOISE_GLYPHS = '0123456789';
+  const NOISE_MS = 1000;
+  const NOISE_TICK = 55;
+  let scrambleGen = 0;
+
+  const nowMs = () => (window.performance && window.performance.now
+    ? window.performance.now()
+    : Date.now());
+
+  const scrambleStats = (box) => {
+    if (!box || box.hidden) return;
+    if (box.classList.contains('is-noise')) return;       // 正在跑，不叠加
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const cells = Array.prototype.slice.call(box.querySelectorAll('.stat'));
+    if (!cells.length) return;
+
+    const gen = ++scrambleGen;
+    const t0 = nowMs();
+    box.classList.add('is-noise');
+
+    const settle = () => {
+      cells.forEach((cell) => {
+        const v = cell.querySelector('.stat-v');
+        if (!v) return;
+        v.textContent = v.dataset.value || v.textContent;
+        v.removeAttribute('aria-hidden');
+      });
+      box.classList.remove('is-noise');
+    };
+
+    const step = () => {
+      if (gen !== scrambleGen) return;                    // 已被重绘作废（settle 会由那次重绘收尾）
+      const t = (nowMs() - t0) / NOISE_MS;
+      if (t >= 1) { settle(); return; }
+      cells.forEach((cell) => {
+        const v = cell.querySelector('.stat-v');
+        if (!v) return;
+        const target = v.dataset.value || '';
+        /* 从左到右逐位"锁死"：越接近结束，稳定的位越多 ——
+           比整串随机更像"正在把数字读出来" */
+        let out = '';
+        for (let i = 0; i < target.length; i += 1) {
+          const lockAt = (i + 1) / (target.length + 1);
+          out += (t >= lockAt || target[i] < '0' || target[i] > '9')
+            ? target[i]
+            : NOISE_GLYPHS[(Math.random() * NOISE_GLYPHS.length) | 0];
+        }
+        v.textContent = out;
+        v.setAttribute('aria-hidden', 'true');
+      });
+      window.setTimeout(step, NOISE_TICK);
+    };
+
+    step();
+  };
+
+  const wireStatsNoise = (box) => {
+    if (!box) return;
+    /* 整块一起抖：三个数字是一组读数，拆开各抖各的反而碎 */
+    box.addEventListener('mouseenter', () => scrambleStats(box));
+    box.addEventListener('focusin', () => scrambleStats(box));
+    /* 触屏没有 hover：点一下也能看到这个反馈 */
+    box.addEventListener('touchstart', () => scrambleStats(box), { passive: true });
+  };
+
   const mountStats = () => {
     const cfg = (window.SITE && window.SITE.stats) || {};
     if (cfg.enabled === false) return;
     if (doc.querySelector('[data-stats]')) return;
 
     const box = buildStats();
-    /* 首屏：挂进 .world 的左下角（入场那一屏由 CSS 保持不可见）；
-       内页：插在页脚之前，是文档流里的一行，不压任何东西 */
+    /* 内页：挂到**侧边栏下部**（.nav-foot 之前）—— 侧边栏是 fixed 的，
+       滚动时它一直在视野里，比原来页脚上方那一行明显得多。
+       首屏没有侧边栏：仍是左下角那一条（与时钟/命令条同一套角标语言）。 */
     const world = doc.getElementById('world');
+    const nav = doc.querySelector('.nav');
     if (world) {
       world.appendChild(box);
+    } else if (nav) {
+      const foot = nav.querySelector('.nav-foot');
+      if (foot && foot.parentNode === nav) nav.insertBefore(box, foot);
+      else nav.appendChild(box);
     } else {
       const page = doc.querySelector('.page') || doc.body;
       const foot = page.querySelector('.foot');
@@ -206,6 +295,7 @@
 
     const keepDays = Number(cfg.keepDays) > 0 ? Number(cfg.keepDays) : 60;
     paint(box, 'local', localNums(bumpLocal(keepDays)));
+    wireStatsNoise(box);
 
     if (typeof cfg.endpoint === 'string' && cfg.endpoint) {
       const timeout = Number(cfg.timeout) > 0 ? Number(cfg.timeout) : 4000;

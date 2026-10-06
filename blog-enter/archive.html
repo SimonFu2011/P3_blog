@@ -120,27 +120,44 @@
          筛选：分类（单选）+ 标签（多选，可叠加）
          维度之间是"与"；状态写进 URL 查询串，刷新与分享都能复现。
          全部由 js/archive.js 渲染并接管。
+
+         版式是**两列**：左列是两个维度的精确开关（胶囊），
+         右列是同一份标签数据的"词云"视图 —— 词云按篇数决定字号，
+         由 archive.js 用"中心向外螺旋 + 矩形碰撞"逐个摆位填满矩形
+         （不是换行排布：换行会留下大块空白，那是标签行不是词云）。
          ============================================================ -->
     <section class="filters" aria-labelledby="filterTitle">
       <h2 class="sr-only" id="filterTitle">筛选条件</h2>
 
-      <div class="filter-row">
-        <span class="filter-label" id="catLabel">分类</span>
-        <div class="chips" id="catChips" role="group" aria-labelledby="catLabel"></div>
+      <div class="filter-pane">
+        <div class="filter-row">
+          <span class="filter-label" id="catLabel">分类</span>
+          <div class="chips" id="catChips" role="group" aria-labelledby="catLabel"></div>
+        </div>
+
+        <div class="filter-row">
+          <span class="filter-label" id="tagLabel">标签</span>
+          <div class="chips" id="tagChips" role="group" aria-labelledby="tagLabel"></div>
+        </div>
       </div>
 
-      <div class="filter-row">
-        <span class="filter-label" id="tagLabel">标签</span>
-        <div class="chips" id="tagChips" role="group" aria-labelledby="tagLabel"></div>
-      </div>
-
-      <!-- 标签云：与上面的标签胶囊是**同一个维度**的两种画法 ——
-           胶囊是精确开关，云是按热度浏览（字号/颜色由该标签下的文章数决定）。
-           两者共用 js/archive.js 里同一份 State.tags，所以点哪边都一样。
-           收起这一行只在"一个标签都没有"时由脚本隐藏。 -->
-      <div class="filter-row filter-row-cloud">
-        <span class="filter-label" id="cloudLabel">标签云</span>
+      <!-- 词云：与左边的标签胶囊是**同一个维度**的两种画法 ——
+           胶囊是精确开关，词云是按热度浏览（字号/颜色由该标签下的文章数决定）。
+           两者共用 js/archive.js 里同一份 State.tags，点哪边都一样。
+           整个云在"一个标签都没有"时由脚本隐藏。
+           "全部"不在云里：它不参与热度缩放，放在抬头行更清楚（也避免
+           让一个不按字号排的东西混进碰撞布局）。 -->
+      <div class="cloud-box" id="cloudBox">
+        <div class="cloud-head">
+          <span class="filter-label" id="cloudLabel">标签云</span>
+          <button class="tc-all" type="button" id="cloudAll" aria-pressed="true"
+                  aria-label="全部文章：清空分类与标签筛选">全部<span class="tc-n" id="cloudAllN">0</span></button>
+          <span class="cloud-note">字号 = 篇数 · 点词筛选</span>
+        </div>
         <div class="tagcloud" id="tagCloud" role="group" aria-labelledby="cloudLabel"></div>
+        <!-- 兜底行：极端窄的容器里可能有词摆不下（碰撞找不到位置），
+             它们退到这里，保证每一个标签都仍然可点、不被藏起来 -->
+        <div class="cloud-rest" id="cloudRest" hidden></div>
       </div>
 
       <div class="chip-row-aux">

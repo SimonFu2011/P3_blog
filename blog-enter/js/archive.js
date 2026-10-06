@@ -266,32 +266,65 @@
   };
 
   /* ------------------------------------------------------------
-     标签云：同一个维度的"热度视图"
+     词云：同一个维度的"热度视图"
      ------------------------------------------------------------
-     与上面的标签胶囊是同一份状态（State.tags）的两种画法：
+     与左边的标签胶囊是同一份状态（State.tags）的两种画法：
        · 胶囊 = 精确开关（点一下叠加 / 取消一个标签）
-       · 云   = 按热度浏览（字号与颜色由该标签下的文章数决定）
+       · 词云 = 按热度浏览（字号与颜色由该标签下的文章数决定）
      两者共用 toggleTag()，所以任何一边点完，另一边的高亮都会跟着变。
 
-     字号连续：--heat（0~1）× CSS 里的 --tc-range + 基准；
-     颜色三档：CSS 没办法对变量做区间判断，而"三档色 + 连续字号"已经
-     足够表达热度，也更好控制对比度（越热越接近正文色，越冷越淡）。
+     字号连续：--heat（0~1）× CSS 里的 --tc-range + 基准，再乘一个
+     排布时的缩放档位 --tc-scale（放不下才缩，见 packCloud）；
+     颜色三档：CSS 没法对变量做区间判断，而"三档色 + 连续字号"已经
+     足够表达热度，也更好控制对比度。
 
-     "全部"与胶囊里的"不限"含义不同：这里的"全部"= 清空**所有**筛选
-     （含分类），也就是需求里的"恢复完整列表"，所以它调 clearAll()。
+     "全部"在抬头行（#cloudAll），不混进云里：它不参与热度缩放，
+     也不该占掉碰撞布局里的位置。它清空**所有**筛选（含分类），
+     也就是需求里的"恢复完整列表"。
+
+     【为什么"只在标签集合变化时才重建"】
+     筛选（点词/点胶囊/切分类）不改各标签的篇数，所以词的集合、字号、
+     位置都不该变。如果每次 render 都重建，点一下就会让整片云重新排布、
+     所有词跳一次位 —— 那是很糟的观感。所以：集合变了才重建，否则只
+     同步选中态（syncCloud）。
      ------------------------------------------------------------ */
+  let cloudSig = '';
+
+  const cloudSignature = () => derived.tagList.map((t) => t.name + ':' + t.n).join('|');
+
+  const syncCloud = () => {
+    const allBtn = $('#cloudAll');
+    const allN = $('#cloudAllN');
+    const none = State.cat === ALL && State.tags.length === 0;
+    if (allBtn) {
+      allBtn.setAttribute('aria-pressed', none ? 'true' : 'false');
+      allBtn.setAttribute('aria-label', '全部文章：清空分类与标签筛选，共 ' + total() + ' 篇');
+    }
+    if (allN) allN.textContent = String(total());
+    Array.prototype.forEach.call(document.querySelectorAll('#tagCloud .tc-tag'), (b) => {
+      const on = State.tags.indexOf(b.dataset.tag) >= 0;
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.setAttribute('aria-label', '标签 ' + b.dataset.tag + '：' + b.dataset.count + ' 篇' + (on ? '（已选）' : ''));
+    });
+  };
+
   const renderCloud = () => {
     const host = $('#tagCloud');
+    const box = $('#cloudBox');
     if (!host) return;
-    const row = host.closest('.filter-row');
     const tags = derived.tagList;
+    if (box) box.hidden = !tags.length;
+
+    const sig = cloudSignature();
+    if (sig === cloudSig && host.children.length) { syncCloud(); return; }
+    cloudSig = sig;
 
     host.textContent = '';
-    if (!tags.length) {
-      if (row) row.hidden = true;
-      return;
-    }
-    if (row) row.hidden = false;
+    const restBox = $('#cloudRest');
+    if (restBox) { restBox.textContent = ''; restBox.hidden = true; }
+    if (!tags.length) return;
+    /* 词都挂在 .cloud-inner 上：整层最后会被等比缩放铺满容器（见 packCloud） */
+    const inner = cloudInner(host);
 
     const counts = tags.map((t) => t.n);
     const max = Math.max.apply(null, counts);
@@ -301,38 +334,198 @@
     const span = (max - min) || 1;
     const same = max === min;
 
-    const push = (cls, label, n, heat, band, pressed, aria, pick) => {
-      const b = el('button', 'tc-tag' + (cls ? ' ' + cls : ''));
-      b.type = 'button';
-      b.setAttribute('aria-pressed', pressed ? 'true' : 'false');
-      b.setAttribute('aria-label', aria);
-      b.style.setProperty('--heat', heat.toFixed(3));
-      if (band) b.dataset.heat = band;
-      b.appendChild(el('span', 'tc-name', label));
-      b.appendChild(el('span', 'tc-n', String(n)));
-      b.addEventListener('click', () => {
-        /* 点一下就把整块云重画了：记下位置，重画后把焦点还给同一枚，
-           否则键盘用户按一次回车，焦点就掉回 <body> 了 */
-        const idx = Array.prototype.indexOf.call(host.children, b);
-        pick();
-        render();
-        const again = host.children[idx];
-        if (again && again.focus) again.focus({ preventScroll: true });
-      });
-      host.appendChild(b);
-    };
-
-    push('tc-all', '全部', total(), 1, null,
-      State.cat === ALL && State.tags.length === 0,
-      '全部文章：清空分类与标签筛选，共 ' + total() + ' 篇', clearAll);
-
+    /* DOM 顺序 = 篇数降序 = 排布顺序（packCloud 依赖它：先摆大的） */
     tags.forEach((t) => {
       const heat = same ? 1 : (t.n - min) / span;
-      const on = State.tags.indexOf(t.name) >= 0;
-      push('', t.name, t.n, heat, heat >= 0.66 ? 'hot' : heat >= 0.33 ? 'warm' : 'cool', on,
-        '标签 ' + t.name + '：' + t.n + ' 篇' + (on ? '（已选）' : ''),
-        () => toggleTag(t.name));
+      const b = el('button', 'tc-tag');
+      b.type = 'button';
+      b.dataset.tag = t.name;
+      b.dataset.count = String(t.n);
+      b.dataset.heat = heat >= 0.66 ? 'hot' : heat >= 0.33 ? 'warm' : 'cool';
+      b.style.setProperty('--heat', heat.toFixed(3));
+      b.appendChild(el('span', 'tc-name', t.name));
+      b.appendChild(el('span', 'tc-n', String(t.n)));
+      b.addEventListener('click', () => {
+        toggleTag(t.name);
+        render();
+      });
+      inner.appendChild(b);
     });
+
+    syncCloud();
+    packCloud();
+  };
+
+  /* ------------------------------------------------------------
+     词云排布：中心螺旋 + 矩形碰撞
+     ------------------------------------------------------------
+     仿的是经典词云（word cloud）的排法，不是 flex 换行 ——
+     换行会在每行末尾留下大块空白，那是"标签行"，不是词云。
+       1) 按篇数从大到小（= DOM 顺序）逐个摆；
+       2) 每个词从容器中心出发，沿螺旋线由内向外找一个不与已摆矩形相交、
+          且完全落在容器内的位置；
+       3) 螺旋走完仍找不到 → 整体缩一档字号重来（CLOUD_SIZE_STEPS）；
+       4) 缩到最小还是放不下 → 退到下面的 .cloud-rest 行（仍然可点，
+          不会被藏起来）。
+     为什么不用第三方库：本站零依赖，而这里只有"测量 + 碰撞"两件事，
+     二十来个词的开销是亚毫秒级。
+
+     重排时机：重建（renderCloud 末尾）与容器尺寸变化（ResizeObserver ——
+     窗口缩放、侧边栏收起/展开都会改变内容区宽度）。字体就绪后再排一次，
+     避免量到 fallback 字体的宽度。
+     ------------------------------------------------------------ */
+  const CLOUD_GAP = 4;                                     // 词与词之间的缝（px）
+  const CLOUD_SIZE_STEPS = [1, 0.9, 0.8, 0.7, 0.6, 0.52];  // 放不下时依次缩小
+  const CLOUD_FILL = 0.96;                                 // 整朵云最后铺到容器的多少
+  const CLOUD_ZOOM_MAX = 2.2;                              // 放大上限（别把小簇撑成怪样子）
+
+  /* 词都放进这一层里：位置是"自然坐标"，最后整层做一次等比缩放 + 居中，
+     于是不管容器多大，云都能铺满（参考图里最大的词几乎顶到上下边缘，
+     就是这个效果）。放在内层也是为了不和词自己的悬停位移打架 ——
+     词上的 transform 属于词，整块的缩放属于这一层。 */
+  const cloudInner = (host) => {
+    let inner = host.querySelector('.cloud-inner');
+    if (!inner) {
+      inner = el('div', 'cloud-inner');
+      host.appendChild(inner);
+    }
+    return inner;
+  };
+
+  const packCloud = () => {
+    const host = $('#tagCloud');
+    const restBox = $('#cloudRest');
+    if (!host) return;
+    const inner = cloudInner(host);
+
+    /* 先把上一轮退到兜底行里的词收回来：不收回的话，下一次重建会把它们
+       连同兜底行一起清掉，那些标签就彻底消失了 */
+    if (restBox) {
+      Array.prototype.slice.call(restBox.querySelectorAll('.tc-tag')).forEach((w) => {
+        w.classList.remove('is-rest');
+        w.style.left = '';
+        w.style.top = '';
+        inner.appendChild(w);
+      });
+      restBox.textContent = '';
+      restBox.hidden = true;
+    }
+
+    const words = Array.prototype.slice.call(inner.querySelectorAll('.tc-tag'));
+    if (!words.length) return;
+    const W = host.clientWidth;
+    const H = host.clientHeight;
+    if (!W || !H) {                       // 容器还没量到尺寸（隐藏 / 首帧之前）
+      words.forEach((w) => { w.style.left = '0px'; w.style.top = '0px'; });
+      inner.style.transform = 'none';
+      return;
+    }
+
+    const placed = [];
+    const hits = (x, y, w, h) => {
+      if (x < 0 || y < 0 || x + w > W || y + h > H) return true;
+      for (let i = 0; i < placed.length; i += 1) {
+        const p = placed[i];
+        if (x < p.x + p.w + CLOUD_GAP && x + w + CLOUD_GAP > p.x
+          && y < p.y + p.h + CLOUD_GAP && y + h + CLOUD_GAP > p.y) return true;
+      }
+      return false;
+    };
+
+    const unplaced = [];
+    words.forEach((word) => {
+      let done = false;
+      for (let si = 0; si < CLOUD_SIZE_STEPS.length && !done; si += 1) {
+        word.style.setProperty('--tc-scale', String(CLOUD_SIZE_STEPS[si]));
+        const w = word.offsetWidth;
+        const h = word.offsetHeight;
+        const cx = (W - w) / 2;
+        const cy = (H - h) / 2;
+        /* 步长要足够小，否则会"跳过"窄缝；椭圆系数让螺旋在宽扁容器里
+           更快铺开（这朵云通常接近 2:1） */
+        for (let step = 0; step < 900; step += 1) {
+          const t = step * 0.28;
+          const r = 2.4 * t;
+          if (r > Math.max(W, H)) break;
+          const x = cx + r * Math.cos(t) * 1.18;
+          const y = cy + r * Math.sin(t) * 0.72;
+          if (!hits(x, y, w, h)) {
+            word.style.left = Math.round(x) + 'px';
+            word.style.top = Math.round(y) + 'px';
+            placed.push({ x, y, w, h });
+            done = true;
+            break;
+          }
+        }
+      }
+      if (!done) {
+        word.style.setProperty('--tc-scale', String(CLOUD_SIZE_STEPS[CLOUD_SIZE_STEPS.length - 1]));
+        unplaced.push(word);
+      }
+    });
+
+    if (unplaced.length && restBox) {
+      restBox.hidden = false;
+      unplaced.forEach((w) => {
+        w.classList.add('is-rest');
+        w.style.left = '';
+        w.style.top = '';
+        restBox.appendChild(w);
+      });
+    }
+
+    /* 铺满：量出这一簇的实际外接矩形，等比放大并居中。
+       只放大不缩小（scale ≥ 1）：缩下去会让字号跌破可读下限，
+       而"摆不下"的情况已经由 CLOUD_SIZE_STEPS 与兜底行处理掉了。 */
+    if (!placed.length) { inner.style.transform = 'none'; return; }
+    let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
+    placed.forEach((p) => {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x + p.w > maxX) maxX = p.x + p.w;
+      if (p.y + p.h > maxY) maxY = p.y + p.h;
+    });
+    const bw = Math.max(1, maxX - minX);
+    const bh = Math.max(1, maxY - minY);
+    const s = Math.min(CLOUD_ZOOM_MAX, Math.min((W * CLOUD_FILL) / bw, (H * CLOUD_FILL) / bh));
+    const tx = (W - bw * s) / 2 - minX * s;
+    const ty = (H - bh * s) / 2 - minY * s;
+    inner.style.transform = 'translate(' + tx.toFixed(2) + 'px, ' + ty.toFixed(2) + 'px) scale(' + s.toFixed(4) + ')';
+  };
+
+  /* 容器尺寸变化后重排（防抖：侧边栏收起/展开的过渡会连打十几次 resize） */
+  let packTimer = null;
+  let packedW = 0;
+  let packedH = 0;
+  const schedulePack = () => {
+    if (packTimer) window.clearTimeout(packTimer);
+    packTimer = window.setTimeout(() => {
+      packTimer = null;
+      const host = $('#tagCloud');
+      if (!host) return;
+      if (host.clientWidth === packedW && host.clientHeight === packedH) return;
+      packCloud();
+    }, 130);
+  };
+
+  const watchCloud = () => {
+    const host = $('#tagCloud');
+    if (!host) return;
+    packedW = host.clientWidth;
+    packedH = host.clientHeight;
+    if (typeof window.ResizeObserver === 'function') {
+      try {
+        new window.ResizeObserver(() => schedulePack()).observe(host);
+      } catch (err) {
+        window.addEventListener('resize', schedulePack);
+      }
+    } else {
+      window.addEventListener('resize', schedulePack);
+    }
+    /* 字体就绪后再排一次：量到 fallback 字体的宽度会让大词偏窄 */
+    if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
+      document.fonts.ready.then(() => { packedW = 0; packedH = 0; schedulePack(); }).catch(() => {});
+    }
   };
 
   /* ------------------------------------------------------------
@@ -430,10 +623,15 @@
     readUrl();
 
     $('#filterReset').addEventListener('click', clearAll);
+    /* 词云抬头那个"全部"：清空所有筛选（含分类），即恢复完整列表 */
+    const allBtn = $('#cloudAll');
+    if (allBtn) allBtn.addEventListener('click', clearAll);
     $('#viewList').addEventListener('click', () => { State.view = 'list'; render(); });
     $('#viewTimeline').addEventListener('click', () => { State.view = 'timeline'; render(); });
 
     render();
+    /* 排布依赖容器尺寸，所以要等真正布局完成后再接管尺寸变化 */
+    watchCloud();
   };
 
   if (document.readyState === 'loading') {
