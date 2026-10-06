@@ -121,6 +121,20 @@ img { max-width: 100%; display: block; }
 button { font: inherit; color: inherit; }
 :focus-visible { outline: 3px solid var(--red); outline-offset: 4px; border-radius: 2px; }
 
+/* ------------------------------------------------------------
+   hidden 必须真的能藏住元素（这条不是洁癖，是修一个线上缺陷）
+   ------------------------------------------------------------
+   浏览器给 `[hidden]` 的默认样式只有 `display:none`，它来自 **UA 样式表** ——
+   任何一条作者写的 `display` 都能把它推翻，哪怕选择器只是 `.某类名`。
+   实测就是这样：`.notfound-box{display:grid}`（本文件末尾那条）把
+   `<section id="notFound" hidden>` 的 hidden 打穿了，于是**每一篇文章页
+   底部都挂着一块"NOT FOUND / 这篇文章不存在"**（在正文之后、评论区下方，
+   不在首屏，所以一直没被发现）。
+   JS 那边一律用 `el.hidden = true/false` 开关元素，所以这里把它钉死：
+   带 hidden 属性的元素一律不显示，要显示就摘掉属性。
+   ------------------------------------------------------------ */
+[hidden] { display: none !important; }
+
 /* 跳转到正文：键盘用户第一个 Tab 就能跳过侧边栏 */
 .skip {
   position: absolute; left: 12px; top: -60px; z-index: 40;

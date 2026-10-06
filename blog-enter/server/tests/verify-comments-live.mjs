@@ -175,6 +175,11 @@ ok('Waline 面板渲染进 #commentsMount', !!widget && widget.panel, JSON.strin
 ok('评论输入框存在', !!widget && widget.editor, JSON.stringify(widget));
 if (widget) ok('评论区可见（不是 hidden）', widget.comments);
 
+/* 顺带守住一个已经踩过的坑：`.notfound-box{display:grid}` 会把 hidden 打穿，
+   于是每篇文章页底部都挂着"NOT FOUND / 这篇文章不存在"。看属性不够，要看计算值。 */
+const nfDisplay = await js(`getComputedStyle(document.getElementById('notFound')).display`);
+ok('文章存在时"文章不存在"那一块是真藏的（hidden 没被 CSS 打穿）', nfDisplay === 'none', nfDisplay);
+
 const apiHits = requests.filter((u) => u.includes('/comments/api/'));
 ok('客户端确实请求了评论接口', apiHits.length > 0, JSON.stringify(apiHits.slice(0, 3)));
 const bundleHits = requests.filter((u) => u.includes('/comments/waline.'));
@@ -187,6 +192,9 @@ const external = requests.filter((u) => {
 });
 ok('除评论服务外没有外部请求（本站零外部依赖）', external.length === 0, JSON.stringify(external.slice(0, 5)));
 ok('控制台没有报错', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
+/* 截图对准评论区本身 —— 文章很长，不滚过去的话截到的只是正文开头 */
+await js(`document.getElementById('comments').scrollIntoView({block:'start'}); true`);
+await sleep(700);
 await shot('comments-article');
 
 /* ============================================================
@@ -199,14 +207,18 @@ await goto(SITE + '/article.html?slug=this-slug-does-not-exist', 2500);
 const notFound = await js(`(function(){
   const c = document.getElementById('comments');
   const mount = document.getElementById('commentsMount');
+  const nf = document.getElementById('notFound');
   return {
-    notFoundShown: !document.getElementById('notFound').hidden,
+    notFoundShown: !nf.hidden,
+    notFoundDisplay: getComputedStyle(nf).display,
     commentsHidden: !!c && c.hidden,
     mountEmpty: !!mount && mount.querySelectorAll('*').length === 0,
     article: window.Article || null
   };
 })()`);
 ok('显示"这篇文章不存在"', notFound.notFoundShown, JSON.stringify(notFound));
+ok('"文章不存在"那一块是真的渲染出来了（不只是摘了 hidden）',
+  notFound.notFoundDisplay !== 'none', notFound.notFoundDisplay);
 ok('评论区保持 hidden', notFound.commentsHidden, JSON.stringify(notFound));
 ok('#commentsMount 是空的（没被初始化）', notFound.mountEmpty, JSON.stringify(notFound));
 const strayApi = requests.filter((u) => u.includes('/comments/api/'));
