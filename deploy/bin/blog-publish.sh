@@ -99,10 +99,17 @@ fi
 # 只提交内容（posts.js 与上传的图片）—— 代码文件（dev-server.mjs 等）保持
 # "脏就报错"，那些应该由人 review 后再提交，不该被一个自动流程吞掉。
 if [ "${AUTO_COMMIT_CONTENT:-1}" = "1" ]; then
+  # 【必须关掉路径转义】git 默认把非 ASCII 文件名转义成八进制并用双引号包住：
+  #     ?? "blog-enter/img/uploads/\345\276\256\344\277\241\345\233\276..."
+  #   于是下面按前缀匹配时**匹配不上** → 中文文件名的图片永远不会被提交 →
+  #   工作区一直脏 → 发布被"脏就报错"的闸门拒绝 → 图片到不了线上。
+  #   症状就是使用者报的"无法上传图片"；而英文名的图一切正常，极难自己想到。
+  # quotePath=false 让 git 原样输出 UTF-8 路径。
+  git config core.quotePath false
+
   # 取出全部改动路径（去掉状态列），再把落在内容前缀里的挑出来。
   # --untracked-files=all 是必须的：新上传的图片是**未跟踪**文件，
-  # 不带上这个参数时 git status 只会给出目录名（img/uploads/），
-  # git add 到那个路径虽然也能工作，但列出来的东西看不清楚。
+  # 不带上这个参数时 git status 只会给出目录名（img/uploads/）。
   mapfile -t all_changed < <(git status --porcelain --untracked-files=all | cut -c4-)
   content_files=()
   for f in "${all_changed[@]}"; do
