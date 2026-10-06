@@ -18,16 +18,12 @@ WEB_ROOT="${WEB_ROOT:-/var/www/blog}"
 BRANCH="${BRANCH:-main}"
 SITE_DIR="$REPO_DIR/blog-enter"
 
-# "内容"文件的白名单：只有这些会被自动提交。
-# 代码（dev-server.mjs / blog-publish.sh 等）不在此列 —— 那些改动应该由人
-# review 后提交，不该被一个由 HTTP 请求触发的自动流程吞掉。
-#
-# 必须是**数组**：git 的 pathspec 参数是分开传的。写成
-#   CONTENT_PATHS="a b"
-#   git status --porcelain -- "$CONTENT_PATHS"
-# 会把 "a b" 当成**一个**路径（含空格），永远匹配不到任何文件 ——
-# 于是自动提交被静默跳过，发布又因为"工作区脏"被拒。这个坑踩过一次。
-CONTENT_PATHS=(blog-enter/js/posts.js blog-enter/img/uploads)
+# 白名单是**前缀**：git status 的输出里，只要路径落在这些前缀内，就当作"内容"。
+# 为什么按前缀判定、而不是直接 `git add -- "${CONTENT_PATHS[@]}"`：
+#   img/uploads 在还没传过图时**不存在**，而 `git add` 碰到不存在的路径会整体
+#   失败（fatal: pathspec ... did not match any files），一个文件都提交不了。
+#   先按 status 过滤出"真实存在的改动"，再逐个 add，就绕开了这个坑。
+CONTENT_PREFIXES=(blog-enter/js/posts.js blog-enter/img/uploads)
 
 [ -d "$REPO_DIR/.git" ]  || { echo "找不到 git 仓库：$REPO_DIR" >&2; exit 1; }
 [ -d "$SITE_DIR" ]       || { echo "找不到站点目录：$SITE_DIR" >&2; exit 1; }
@@ -76,11 +72,20 @@ cd "$REPO_DIR"
 # 只提交内容（posts.js 与上传的图片）—— 代码文件（dev-server.mjs 等）保持
 # "脏就报错"，那些应该由人 review 后再提交，不该被一个自动流程吞掉。
 if [ "${AUTO_COMMIT_CONTENT:-1}" = "1" ]; then
-  content_changed="$(git status --porcelain -- "${CONTENT_PATHS[@]}" 2>/dev/null || true)"
-  if [ -n "$content_changed" ]; then
+  # 取出全部改动路径（去掉状态列），再把落在内容前缀里的挑出来
+  mapfile -t all_changed < <(git status --porcelain | cut -c4-)
+  content_files=()
+  for f in "${all_changed[@]}"; do
+    [ -n "$f" ] || continue
+    for p in "${CONTENT_PREFIXES[@]}"; do
+      case "$f" in "$p"|"$p"/*) content_files+=("$f"); break ;; esac
+    done
+  done
+
+  if [ "${#content_files[@]}" -gt 0 ]; then
     echo "  检测到内容改动，自动提交（只提交内容文件）："
-    echo "$content_changed" | sed 's/^/    /'
-    git add -- "${CONTENT_PATHS[@]}"
+    printf '    %s\n' "${content_files[@]}"
+    git add -- "${content_files[@]}"
     git -c user.name="blog-publish" -c user.email="blog-publish@localhost" \
         commit -q -m "content: 管理页保存于 $(date -Is)" || echo "  （提交失败，继续尝试发布）"
     echo "  -> $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
