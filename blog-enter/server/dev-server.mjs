@@ -151,11 +151,16 @@ export const createApp = async (options) => {
      纯 HTTP 下加了 Secure 浏览器直接不存 cookie —— 表现是"登录成功但刷新即掉线"。 */
   const cookieSecure = cfg.publicOrigins.some((o) => String(o).toLowerCase().startsWith('https://'));
 
-  /* 该请求是否已解锁。远端模式只看 cookie；本地模式看进程状态。 */
+  /* 该请求是否已解锁。远端模式只看 cookie；本地模式看进程状态。
+     远端模式还会校验会话绑定（UA + IP 网段），见 auth.createSessionStore。 */
   const isUnlockedFor = (req) => {
     if (!cfg.remote) return unlocked;
     const sid = auth.sessionCookieFrom(req);
-    return Boolean(sid && sessions.get(sid));
+    if (!sid) return false;
+    return Boolean(sessions.get(sid, {
+      ip: security.clientIp(req, { trustProxy: cfg.trustProxy }),
+      ua: String(req.headers['user-agent'] || '')
+    }));
   };
 
   /* ---------- 安全闸上下文 ---------- */

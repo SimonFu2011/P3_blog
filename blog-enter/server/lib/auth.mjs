@@ -170,23 +170,52 @@ const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
 export const sessionCookieName = () => SESSION_COOKIE;
 
-export const createSessionStore = ({ idleMs = DEFAULT_IDLE_MS } = {}) => {
-  const sessions = new Map();     // sessionId → { ip, ua, createdAt, lastSeen }
+export const createSessionStore = ({ idleMs = DEFAULT_IDLE_MS, bind = true } = {}) => {
+  const sessions = new Map();     // sessionId → { ip, ipPrefix, ua, createdAt, lastSeen }
 
   const touch = (rec) => { rec.lastSeen = Date.now(); return rec; };
 
-  const get = (sessionId) => {
+  /* IPv4 取 /24、IPv6 取前 4 组：同一个客户端换 IP 的情况（移动网络、
+     多出口家宽）不会被误杀，但"从另一个网络重放 cookie"会被挡住。 */
+  const ipPrefix = (ip) => {
+    const s = String(ip || '');
+    if (!s) return '';
+    if (s.includes(':')) return s.split(':').slice(0, 4).join(':');
+    const parts = s.split('.');
+    return parts.length === 4 ? parts.slice(0, 3).join('.') : s;
+  };
+
+  /**
+   * 取会话，并做**绑定校验**。
+   *
+   * 为什么要绑定：纯 HTTP 阶段 cookie 是明文过网的（Secure 加不了，加了浏览器
+   * 就不存），任何一个中间跳看到 `Cookie: p3_admin_sid=…` 就能原样重放到任何
+   * 地方 —— 那就是完整的内容写权限。绑定 IP 网段 + UA 之后，重放至少要在同一
+   * 个网段并伪造同一个 UA，攻击成本从"复制一个头"变成"还得在同一网络里"。
+   *
+   * 这不是 TLS 的替代品。真正的解法只有 HTTPS（或隧道），见 PLAN-ADMIN-LIVE §3.2。
+   */
+  const get = (sessionId, opts) => {
     if (!sessionId) return null;
     const rec = sessions.get(sessionId);
     if (!rec) return null;
     if (Date.now() - rec.lastSeen > idleMs) { sessions.delete(sessionId); return null; }
+
+    if (bind && opts) {
+      const ua = String(opts.ua || '');
+      /* UA 变了 → 不是同一个浏览器，直接作废 */
+      if (rec.ua && ua && rec.ua !== ua) { sessions.delete(sessionId); return null; }
+      /* 网段变了 → 作废（同网段内换 IP 仍放行） */
+      const now = ipPrefix(opts.ip);
+      if (rec.ipPrefix && now && rec.ipPrefix !== now) { sessions.delete(sessionId); return null; }
+    }
     return touch(rec);
   };
 
   const create = ({ ip, ua } = {}) => {
     const sessionId = randomToken(32);
     sessions.set(sessionId, {
-      ip: ip || '', ua: ua || '',
+      ip: ip || '', ipPrefix: ipPrefix(ip), ua: ua || '',
       createdAt: Date.now(), lastSeen: Date.now()
     });
     return sessionId;

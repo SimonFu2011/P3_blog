@@ -279,6 +279,54 @@ test('远端：超过空闲超时的会话失效', async () => {
   } finally { await sb.cleanup(); }
 });
 
+test('远端：换了 User-Agent 的会话失效（cookie 被盗也重放不了）', async () => {
+  const sb = await makeSandbox();
+  try {
+    await setPassphrase(join(sb.root, '.admin'), PASS);
+    const { base } = await sb.start(REMOTE);
+    const jar = makeJar();
+    absorb(jar, await req(base, '/api/login', {
+      method: 'POST', headers: proxied({ 'user-agent': 'Browser-A' }), body: { passphrase: PASS }
+    }));
+
+    /* 同一 UA：仍然是解锁的 */
+    const same = await req(base, '/api/session', {
+      headers: proxied(Object.assign({ 'user-agent': 'Browser-A' }, jarHeaders(jar)))
+    });
+    assert.equal(json(same).unlocked, true, '同一 UA 应保持解锁');
+
+    /* 换 UA：cookie 一样，但会话必须失效 */
+    const other = await req(base, '/api/session', {
+      headers: proxied(Object.assign({ 'user-agent': 'Browser-B' }, jarHeaders(jar)))
+    });
+    assert.equal(json(other).token, null, '换 UA 后不得再解锁');
+  } finally { await sb.cleanup(); }
+});
+
+test('远端：换了 IP 网段的会话失效（同网段换 IP 仍放行）', async () => {
+  const sb = await makeSandbox();
+  try {
+    await setPassphrase(join(sb.root, '.admin'), PASS);
+    const { base } = await sb.start(REMOTE);
+    const jar = makeJar();
+    absorb(jar, await req(base, '/api/login', {
+      method: 'POST', headers: proxied({ 'x-forwarded-for': '203.0.113.10' }), body: { passphrase: PASS }
+    }));
+
+    /* 同 /24 内换 IP：放行（移动网络/多出口家宽不至于被误杀） */
+    const sameNet = await req(base, '/api/session', {
+      headers: proxied(Object.assign({ 'x-forwarded-for': '203.0.113.99' }, jarHeaders(jar)))
+    });
+    assert.equal(json(sameNet).unlocked, true, '同网段换 IP 应放行');
+
+    /* 换网段：必须失效 */
+    const otherNet = await req(base, '/api/session', {
+      headers: proxied(Object.assign({ 'x-forwarded-for': '198.51.100.7' }, jarHeaders(jar)))
+    });
+    assert.equal(json(otherNet).token, null, '换网段后不得再解锁');
+  } finally { await sb.cleanup(); }
+});
+
 /* ============================================================
    4. Host / Origin 白名单
    ============================================================ */
