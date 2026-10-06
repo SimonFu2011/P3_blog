@@ -61,6 +61,28 @@ fi
 cd "$REPO_DIR"
 
 # ------------------------------------------------------------
+# 【先救图】把只存在于站点根目录的上传图片捞回仓库
+# ------------------------------------------------------------
+# 为什么需要这一步（真实事故）：
+#   上传图片时，管理页把文件写进**站点根目录**的 img/uploads/（那才是要
+#   公网可读的地方）。而发布的方向是"仓库 → 站点根目录"，`--delete` 会把
+#   站点根目录里**仓库没有**的文件当多余文件删掉 —— 于是刚上传的图片
+#   在下次发布时被删掉，而使用者只看到图挂了。
+#
+# 所以发布前先把站点根目录里"仓库没有"的图片反向同步回仓库，
+# 让它们成为受版本控制的内容。仓库才是真源，站点根目录只是产物。
+if [ -d "$WEB_ROOT/img/uploads" ]; then
+  mkdir -p "$SITE_DIR/img/uploads"
+  # -i(--ignore-existing) + -t(--times)：只补仓库里缺的，不覆盖已有的
+  if rsync -rti --ignore-existing --itemize-changes \
+       "$WEB_ROOT/img/uploads/" "$SITE_DIR/img/uploads/" 2>/dev/null | grep -q '^>'; then
+    echo "  从站点根目录捞回仓库缺失的上传图片："
+    rsync -rti --ignore-existing --itemize-changes \
+      "$WEB_ROOT/img/uploads/" "$SITE_DIR/img/uploads/" 2>/dev/null | grep '^>' | sed 's/^/    /'
+  fi
+fi
+
+# ------------------------------------------------------------
 # 【内容先落提交】让"保存即上线"真的能跑通
 # ------------------------------------------------------------
 # 背景：管理页保存时**只写文件，不提交**（服务器的 git 身份/凭据不该被一个
@@ -72,8 +94,11 @@ cd "$REPO_DIR"
 # 只提交内容（posts.js 与上传的图片）—— 代码文件（dev-server.mjs 等）保持
 # "脏就报错"，那些应该由人 review 后再提交，不该被一个自动流程吞掉。
 if [ "${AUTO_COMMIT_CONTENT:-1}" = "1" ]; then
-  # 取出全部改动路径（去掉状态列），再把落在内容前缀里的挑出来
-  mapfile -t all_changed < <(git status --porcelain | cut -c4-)
+  # 取出全部改动路径（去掉状态列），再把落在内容前缀里的挑出来。
+  # --untracked-files=all 是必须的：新上传的图片是**未跟踪**文件，
+  # 不带上这个参数时 git status 只会给出目录名（img/uploads/），
+  # git add 到那个路径虽然也能工作，但列出来的东西看不清楚。
+  mapfile -t all_changed < <(git status --porcelain --untracked-files=all | cut -c4-)
   content_files=()
   for f in "${all_changed[@]}"; do
     [ -n "$f" ] || continue
@@ -111,6 +136,26 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 # ------------------------------------------------------------
+# 【不许丢掉本地内容提交】这是一次真实事故换来的
+# ------------------------------------------------------------
+# 事故经过：管理页写的文章只以**本地提交**形式存在（服务器没有 GitHub
+# 写凭据，推不上去）。有人（我）为了同步代码而 `git reset --hard origin/main`
+# —— 那些内容提交连同文章一起消失了。
+#
+# 所以：本地领先 origin 时，**跳过整个 git 同步**，直接按当前工作区发布。
+# 发布内容本来就不需要联网。需要代码同步时，先解决"服务器推不上去"这件事
+# （deploy key），或者显式 FORCE_GIT_SYNC=1。
+if git rev-parse --verify -q "origin/$BRANCH" >/dev/null 2>&1; then
+  ahead="$(git rev-list --count "origin/$BRANCH..HEAD" 2>/dev/null || echo 0)"
+  if [ "${ahead:-0}" -gt 0 ] && [ "${FORCE_GIT_SYNC:-0}" != "1" ]; then
+    echo "  本地 $BRANCH 领先 origin/$BRANCH $ahead 个提交（管理页产生的内容）。"
+    echo "  跳过代码同步，直接按当前工作区发布 —— 避免 reset 丢掉这些内容。"
+    echo "  （要强行同步代码：FORCE_GIT_SYNC=1 blog-publish；但先确认那些提交已备份）"
+    SKIP_GIT_SYNC=1
+  fi
+fi
+
+# ------------------------------------------------------------
 # 【不要因为连不上 GitHub 就什么都不发布】
 # ------------------------------------------------------------
 # 服务器常常连不上 GitHub（国内网络、只走 SSH、或纯手工同步）。
@@ -118,7 +163,9 @@ fi
 # 结果是"rsync 根本没跑"，管理页保存后表现成"发布失败"。
 # 现在：git 只是"尽力把代码对齐到远端"，对齐不了就明确警告并按**当前工作区**
 # 发布 —— 内容已经在本地工作区里了，发布它才是使用者的本意。
-if git fetch --prune origin 2>/dev/null; then
+if [ "${SKIP_GIT_SYNC:-0}" = "1" ]; then
+  :
+elif git fetch --prune origin 2>/dev/null; then
   # 只快进，不 reset：本地分支落后就前进，分叉或领先就报错让人看
   git checkout -q "$BRANCH" 2>/dev/null || git checkout -q -b "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
   if git merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
@@ -170,6 +217,7 @@ rsync -rlt --omit-dir-times --delete \
   --exclude '.git*' \
   --exclude '.user.ini' \
   --exclude '.well-known/' \
+  --exclude '/img/uploads/' \
   "$SITE_DIR/" "$WEB_ROOT/"
 
 # 图片上传目录留出来（本地还没传过图时它不存在）
