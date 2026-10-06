@@ -671,7 +671,13 @@ export const createApp = async (options) => {
       port: cfg.port,
       allowedHosts,
       allowedOrigins,
-      proxySecret: isAdminSurface ? cfg.proxySecret : null
+      proxySecret: isAdminSurface ? cfg.proxySecret : null,
+      /* 远端模式下额外接受"任意回环源"（http://127.0.0.1:<任意本地端口>）——
+         SSH 隧道的本地端口由使用者随手挑，逐个写进白名单治标不治本（实测
+         同一个错误犯了两次：先把 8848 写进白名单，换成 8850 立刻又 403）。
+         安全性由另外两道保证：对端必须是回环 + 必须带反代密钥。
+         详见 security.assertSameOrigin 的注释。 */
+      allowLoopbackOrigins: cfg.remote
     });
 
     const ctx = {

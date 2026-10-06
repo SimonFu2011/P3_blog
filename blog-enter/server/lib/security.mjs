@@ -130,9 +130,29 @@ export const assertHost = (req, port, allowedHosts = LOOPBACK) => {
 };
 
 /** Origin / Referer 与 Sec-Fetch-Site 判定 */
-export const assertSameOrigin = (req, port, allowedOrigins = null) => {
-  /* allowedOrigins 给了就只认它（反代场景）；否则沿用"只认回环"（本地场景）。
-     用归一化后的 origin 精确比对，不做通配 —— 通配等于把这道闸拆了。 */
+export const assertSameOrigin = (req, port, allowedOrigins = null, allowLoopbackOrigins = false) => {
+  /* allowedOrigins 给了就只认它（反代场景），再加上可选的"任意回环源"。
+     ------------------------------------------------------------
+     为什么要允许任意回环源（allowLoopbackOrigins）：
+       SSH 隧道下页面的源是 `http://127.0.0.1:<你选的本地端口>`，而**那个端口由
+       使用者在本地随手挑**。把它一个个写进白名单是治标不治本 —— 实测同一个错误
+       犯了两次：先用 8848 写进白名单，换成 8850 立刻又 403。
+
+     这不放宽安全边界，因为隧道那一路的防线本来就是另外两道：
+       · "对端必须是回环" —— 公网来的请求过不了
+       · "必须带反代密钥" —— 只有本机那个反代能注入，且它覆盖客户端的同名头
+     Origin 白名单在回环场景下是第三道冗余，而它一旦对不上，**使用者自己就进不来**。
+     公网来的跨站请求依然被拒（外部源不在回环集合里）。 */
+  const loopbackOriginOk = (raw) => {
+    if (!allowLoopbackOrigins) return false;
+    try {
+      const u = new URL(raw);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+      const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+      return h === '127.0.0.1' || h === 'localhost' || h === '::1';
+    } catch { return false; }
+  };
+
   const allowed = allowedOrigins == null
     ? null
     : new Set(Array.from(allowedOrigins).map(normalizeOrigin).filter(Boolean));
@@ -146,7 +166,9 @@ export const assertSameOrigin = (req, port, allowedOrigins = null) => {
   if (origin && origin !== 'null') {
     if (allowed != null) {
       const norm = normalizeOrigin(origin);
-      if (!norm || !allowed.has(norm)) throw new HttpError(403, 'cross-origin request rejected');
+      if ((!norm || !allowed.has(norm)) && !loopbackOriginOk(origin)) {
+        throw new HttpError(403, 'cross-origin request rejected');
+      }
     } else {
       let host = '';
       try { host = normalizeHost(new URL(origin).host); } catch { throw new HttpError(403, 'bad Origin'); }
@@ -166,7 +188,9 @@ export const assertSameOrigin = (req, port, allowedOrigins = null) => {
         const u = new URL(referer);
         norm = u.protocol + '//' + u.host.toLowerCase();
       } catch { throw new HttpError(403, 'bad Referer'); }
-      if (!allowed.has(norm)) throw new HttpError(403, 'cross-site referer rejected');
+      if (!allowed.has(norm) && !loopbackOriginOk(referer)) {
+        throw new HttpError(403, 'cross-site referer rejected');
+      }
     } else {
       let host = '';
       try { host = normalizeHost(new URL(referer).host); } catch { throw new HttpError(403, 'bad Referer'); }
@@ -192,7 +216,8 @@ export const guard = (req, ctx) => {
   assertProxySecret(req, ctx && ctx.proxySecret);
   if (!isLoopbackPeer(req)) throw new HttpError(403, 'non-loopback peer rejected');
   assertHost(req, ctx && ctx.port, ctx && ctx.allowedHosts);
-  assertSameOrigin(req, ctx && ctx.port, ctx && ctx.allowedOrigins);
+  assertSameOrigin(req, ctx && ctx.port, ctx && ctx.allowedOrigins,
+    Boolean(ctx && ctx.allowLoopbackOrigins));
   return true;
 };
 
