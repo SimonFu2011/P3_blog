@@ -23,6 +23,11 @@ UMask=0077
 # --remote          所有 /api/* 需解锁（含 GET），每客户端会话 cookie
 # --public-host     反代带来的真实站点名，加进 Host 白名单
 # --public-origin   允许的 Origin，精确匹配；决定 cookie 是否带 Secure
+#                   回环那两个是**SSH 隧道**必需的：隧道下页面的源是
+#                   http://127.0.0.1:8848，管理页的 fetch 会带上它，
+#                   不在白名单里就会被同源判定拒成
+#                   "cross-origin request rejected"。
+#                   这**不放宽**边界：隧道请求仍要过"对端是回环 + 反代密钥"两道。
 # --trust-proxy     从 X-Forwarded-For 取客户端 IP（退避计数与日志才有意义）
 # --proxy-secret-file  nginx 注入的共享密钥，本机其它进程也进不来
 # --auto-publish    保存后自动跑 blog-publish（改完即上线）
@@ -42,6 +47,8 @@ ExecStart=/usr/local/bin/node /srv/blog/repo/blog-enter/server/dev-server.mjs \
   --public-host simonfu.xin \
   --public-host www.simonfu.xin \
   --public-origin http://43.108.100.116 \
+  --public-origin http://127.0.0.1:8848 \
+  --public-origin http://localhost:8848 \
   --session-idle 120 \
   --trust-proxy \
   --proxy-secret-file /etc/p3blog/proxy-secret \
