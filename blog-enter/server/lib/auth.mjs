@@ -145,6 +145,107 @@ export const throttleState = (ip) => {
 export const resetThrottle = () => { attempts.clear(); };
 
 /* ------------------------------------------------------------
+   每客户端会话（远端模式）
+   ------------------------------------------------------------
+   本地模式下"已解锁"是**进程全局**的一个布尔值，这在单人本机场景下没问
+   题；一旦服务暴露到公网，它就变成致命缺陷：
+
+     你在公网上登录一次 → 整个进程置为已解锁 → 此后**任何人**请求
+     GET /api/session 都能拿到写令牌，直到进程重启。
+
+   所以远端模式改用真正的会话：登录成功生成一个随机 sessionId，
+   经 HttpOnly cookie 下发，服务端存 { ip, ua, createdAt, lastSeen }。
+   判定只依据**当前请求携带的 cookie**，取不到就是未解锁。
+
+   cookie 的属性：
+     HttpOnly                  JS 读不到（XSS 也偷不走）
+     SameSite=Strict           跨站请求不带它（CSRF 第二道）
+     Secure                    仅 HTTPS；纯 HTTP 下必须关掉，否则浏览器
+                               直接不存 —— 见 dev-server 的 --public-origin
+   ------------------------------------------------------------ */
+
+const SESSION_COOKIE = 'p3_admin_sid';
+const DEFAULT_IDLE_MS = 2 * 60 * 60 * 1000;        // 纯 HTTP 阶段默认 2 小时
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+
+export const sessionCookieName = () => SESSION_COOKIE;
+
+export const createSessionStore = ({ idleMs = DEFAULT_IDLE_MS } = {}) => {
+  const sessions = new Map();     // sessionId → { ip, ua, createdAt, lastSeen }
+
+  const touch = (rec) => { rec.lastSeen = Date.now(); return rec; };
+
+  const get = (sessionId) => {
+    if (!sessionId) return null;
+    const rec = sessions.get(sessionId);
+    if (!rec) return null;
+    if (Date.now() - rec.lastSeen > idleMs) { sessions.delete(sessionId); return null; }
+    return touch(rec);
+  };
+
+  const create = ({ ip, ua } = {}) => {
+    const sessionId = randomToken(32);
+    sessions.set(sessionId, {
+      ip: ip || '', ua: ua || '',
+      createdAt: Date.now(), lastSeen: Date.now()
+    });
+    return sessionId;
+  };
+
+  const destroy = (sessionId) => sessions.delete(sessionId);
+
+  /* 定期清掉过期会话，别让 Map 无限增长（公网会有很多半途而废的登录） */
+  const sweeper = setInterval(() => {
+    const now = Date.now();
+    for (const [id, rec] of sessions) {
+      if (now - rec.lastSeen > idleMs) sessions.delete(id);
+    }
+  }, SWEEP_INTERVAL_MS);
+  if (typeof sweeper.unref === 'function') sweeper.unref();
+
+  return {
+    create, get, destroy,
+    size: () => sessions.size,
+    idleMs: () => idleMs,
+    stop: () => clearInterval(sweeper),
+    /* 仅供测试 */
+    _sessions: sessions
+  };
+};
+
+/* ---------- cookie 读写 ---------- */
+
+export const parseCookies = (req) => {
+  const raw = (req && req.headers && req.headers.cookie) || '';
+  const out = new Map();
+  if (!raw) return out;
+  for (const part of String(raw).split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0) continue;
+    const k = part.slice(0, i).trim();
+    let v = part.slice(i + 1).trim();
+    /* cookie 值可能被引号包起来 */
+    if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
+    try { out.set(k, decodeURIComponent(v)); } catch { out.set(k, v); }
+  }
+  return out;
+};
+
+export const sessionCookieFrom = (req) => parseCookies(req).get(SESSION_COOKIE) || '';
+
+export const buildSessionCookie = (sessionId, { secure = false, maxAgeSec = null, clear = false } = {}) => {
+  const parts = [
+    SESSION_COOKIE + '=' + (clear ? '' : encodeURIComponent(sessionId)),
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Strict'
+  ];
+  if (secure) parts.push('Secure');
+  parts.push('Max-Age=' + (clear ? 0 : (maxAgeSec == null ? 0 : Math.floor(maxAgeSec))));
+  return parts.join('; ');
+};
+
+/* ------------------------------------------------------------
    令牌校验
    ------------------------------------------------------------ */
 

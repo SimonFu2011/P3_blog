@@ -1,0 +1,63 @@
+[Unit]
+Description=P3_blog admin server (loopback-only, proxied by BT nginx)
+Documentation=file:/srv/blog/repo/deploy/PLAN-ADMIN-LIVE.md
+After=network.target
+
+[Service]
+Type=simple
+User=blog
+Group=blog
+WorkingDirectory=/srv/blog/repo
+
+# PATH 必须显式给出：systemd 不给继承登录 shell 的 PATH，而 node 装在
+# /usr/local/bin。用 /usr/bin/env node 或裸 node 都会以 "command not found" 失败。
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
+# 运行时数据（.admin/）的权限；同机其它用户读不到口令哈希与会话
+UMask=0077
+
+# 注意：这里**不用** --pass 传口令（会进 ps 与 journald）。口令已用
+#   printf %s "..." | node dev-server.mjs --set-pass --pass-stdin
+# 写进 .admin/passphrase.json。
+#
+# --remote          所有 /api/* 需解锁（含 GET），每客户端会话 cookie
+# --public-host     反代带来的真实站点名，加进 Host 白名单
+# --public-origin   允许的 Origin，精确匹配；决定 cookie 是否带 Secure
+# --trust-proxy     从 X-Forwarded-For 取客户端 IP（退避计数与日志才有意义）
+# --proxy-secret-file  nginx 注入的共享密钥，本机其它进程也进不来
+# --auto-publish    保存后自动跑 blog-publish（改完即上线）
+#
+# --session-idle 120：纯 HTTP 阶段把空闲超时压到 2 小时。
+#   域名与证书就绪后，追加 --public-origin https://simonfu.xin 并把这里
+#   改成 720（12 小时）—— cookie 会自动带上 Secure，风险回到可接受水平。
+ExecStart=/usr/local/bin/node /srv/blog/repo/blog-enter/server/dev-server.mjs \
+  --port 8848 \
+  --remote \
+  --public-host 43.108.100.116 \
+  --public-host simonfu.xin \
+  --public-host www.simonfu.xin \
+  --public-origin http://43.108.100.116 \
+  --session-idle 120 \
+  --trust-proxy \
+  --proxy-secret-file /etc/p3blog/proxy-secret \
+  --auto-publish
+
+Restart=on-failure
+RestartSec=3
+
+# ---- 沙箱 ----
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+# 仓库要能写（posts.js / 备份 / 回收站）
+ReadWritePaths=/srv/blog/repo
+# 站点根目录要能写：--auto-publish 会以 blog 身份跑 blog-publish，
+# 而它要 rsync 进 /www/wwwroot/<站点>。blog 在 www 组里、目录是 2775。
+ReadWritePaths=/www/wwwroot/43.108.100.116
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

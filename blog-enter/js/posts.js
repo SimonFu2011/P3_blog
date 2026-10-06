@@ -82,58 +82,14 @@ window.POSTS = [
   },
 
   {
-    slug: 'static-blog-without-framework',
-    title: '不用框架的静态博客：文件即数据',
-    date: '2025-05-26',
-    category: '工程',
-    tags: ['静态站点', '构建', '性能'],
-    excerpt: '没有打包器、没有依赖、双击 HTML 就能跑。代价是要自己处理数据加载、模板渲染和 404 的兜底。',
-    body: [
-      '<p>这个站点的全部依赖是零。没有打包器，没有运行时框架，<code>node_modules</code> 不存在。<code>index.html</code> 双击就能打开，扔进任何静态托管也能直接跑。</p>',
-
-      '<h2>数据放在哪</h2>',
-      '<p>第一版我把文章写成 JSON，用 <code>fetch</code> 读。浏览器里没问题，但 <code>file://</code> 协议下 <code>fetch</code> 会被 CORS 直接拒掉 —— 双击打开就是一片空白。所以改成 <strong>JS 全局变量 + script 标签</strong>：</p>',
-
-      '<pre><code class="lang-html">&lt;!-- 这样 file:// 与 http:// 的行为完全一致 --&gt;',
-      '&lt;script src="js/posts.js"&gt;&lt;/script&gt;',
-      '&lt;script&gt;',
-      '  const post = window.POSTS.find(p =&gt; p.slug === slug);',
-      '&lt;/script&gt;</code></pre>',
-
-      '<p>代价是数据不能太大 —— 它会进首屏的解析路径。文章正文全部内联的话，几百篇就会开始拖慢加载。真到那个规模，就该拆成"列表索引"和"按篇正文"两个文件，或者干脆回到服务端渲染。</p>',
-
-      '<h2>渲染顺序</h2>',
-      '<p>脚本用 <code>defer</code> 加载，DOM 就绪后才拿得到节点。渲染的挂载点要放在脚本之前，且必须显式声明，避免"找不到容器时静默失败"：</p>',
-
-      '<pre><code class="lang-js">function render(slug) {',
-      '  const host = document.getElementById("articleBody");',
-      '  if (!host) {',
-      '    console.error("[article] 缺少挂载点 #articleBody");',
-      '    return;',
-      '  }',
-      '  const post = (window.POSTS || []).find((p) =&gt; p.slug === slug);',
-      '  if (!post) {',
-      '    // 找不到文章 = 一次 404，但当前页面已经渲染出来了，',
-      '    // 直接跳转会让用户"闪一下"，所以就地画一个空状态',
-      '    host.innerHTML = notFoundMarkup(slug);',
-      '    return;',
-      '  }',
-      '  host.innerHTML = post.body;',
-      '}</code></pre>',
-
-      '<h2>404 的两种形态</h2>',
-      '<p>静态站点没有服务端路由，404 有两种情况要分开处理：</p>',
-      '<ol>',
-      '  <li><strong>路径本身不存在</strong> —— 由托管平台返回 <code>404.html</code>，所以这个文件必须真的存在；</li>',
-      '  <li><strong>路径存在但参数无效</strong> —— 比如 <code>article.html?slug=不存在</code>。这时页面框架是好的，就地渲染一个"文章不存在"的空状态，比整页跳走更自然。</li>',
-      '</ol>',
-
-      '<blockquote>',
-      '  <p>静态站点的可靠性来自"没有东西可以挂"。少了构建步骤，也少了构建失败、依赖漂移和 hydration 不匹配。</p>',
-      '  <cite>关于取舍</cite>',
-      '</blockquote>'
-    ].join('\n')
-  },
+  slug: 'static-blog-without-framework',
+  title: '不用框架的静态博客：文件即数据',
+  date: '2025-05-29',
+  category: '工程',
+  tags: ['静态站点', '构建', '性能'],
+  excerpt: '没有打包器、没有依赖、双击 HTML 就能跑。代价是要自己处理数据加载、模板渲染和 404 的兜底。',
+  body: '<p>这个站点的全部依赖是零。没有打包器，没有运行时框架，<code>node_modules</code> 不存在。<code>index.html</code> 双击就能打开，扔进任何静态托管也能直接跑。</p>\n<h2>数据放在哪</h2>\n<p>第一版我把文章写成 JSON，用 <code>fetch</code> 读。浏览器里没问题，但 <code>file://</code> 协议下 <code>fetch</code> 会被 CORS 直接拒掉 —— 双击打开就是一片空白。所以改成 <strong>JS 全局变量 + script 标签</strong>：</p>\n<pre><code class="lang-html">&lt;!-- 这样 file:// 与 http:// 的行为完全一致 --&gt;\n&lt;script src="js/posts.js"&gt;&lt;/script&gt;\n&lt;script&gt;\n  const post = window.POSTS.find(p =&gt; p.slug === slug);\n&lt;/script&gt;</code></pre>\n<p>代价是数据不能太大 —— 它会进首屏的解析路径。文章正文全部内联的话，几百篇就会开始拖慢加载。真到那个规模，就该拆成"列表索引"和"按篇正文"两个文件，或者干脆回到服务端渲染。</p>\n<h2>渲染顺序</h2>\n<p>脚本用 <code>defer</code> 加载，DOM 就绪后才拿得到节点。渲染的挂载点要放在脚本之前，且必须显式声明，避免"找不到容器时静默失败"：</p>\n<pre><code class="lang-js">function render(slug) {\n  const host = document.getElementById("articleBody");\n  if (!host) {\n    console.error("[article] 缺少挂载点 #articleBody");\n    return;\n  }\n  const post = (window.POSTS || []).find((p) =&gt; p.slug === slug);\n  if (!post) {\n    // 找不到文章 = 一次 404，但当前页面已经渲染出来了，\n    // 直接跳转会让用户"闪一下"，所以就地画一个空状态\n    host.innerHTML = notFoundMarkup(slug);\n    return;\n  }\n  host.innerHTML = post.body;\n}</code></pre>\n<h2>404 的两种形态</h2>\n<p>静态站点没有服务端路由，404 有两种情况要分开处理：</p>\n<ol>\n  <li><strong>路径本身不存在</strong> —— 由托管平台返回 <code>404.html</code>，所以这个文件必须真的存在；</li>\n  <li><strong>路径存在但参数无效</strong> —— 比如 <code>article.html?slug=不存在</code>。这时页面框架是好的，就地渲染一个"文章不存在"的空状态，比整页跳走更自然。</li>\n</ol>\n<blockquote>\n  <p>静态站点的可靠性来自"没有东西可以挂"。少了构建步骤，也少了构建失败、依赖漂移和 hydration 不匹配。</p>\n  <cite>关于取舍</cite>\n</blockquote>'
+},
 
   {
     slug: 'color-layering',
