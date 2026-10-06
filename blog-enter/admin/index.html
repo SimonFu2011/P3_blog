@@ -37,8 +37,8 @@
   <div class="ad-gate-box">
     <h2>输入访问口令</h2>
     <p class="ad-gate-note">
-      这个口令是本机管理接口的第二把锁（第一把是"只监听 127.0.0.1 + 同源判定"）。
-      口令以 PBKDF2-SHA256 哈希保存在 <code>.admin/passphrase.json</code>，不存明文。
+      访问口令以 PBKDF2-SHA256 哈希保存在服务器上的
+      <code>.admin/passphrase.json</code>，不存明文。区分大小写，首尾不要带空格。
     </p>
     <form id="gateForm" autocomplete="off">
       <input type="password" id="gatePass" placeholder="口令" autocomplete="current-password" required>
@@ -46,7 +46,12 @@
     </form>
     <p class="ad-gate-error" id="gateError" role="alert"></p>
     <p class="ad-gate-hint">
-      忘记了？在终端执行：<code>node blog-enter/server/dev-server.mjs --clear-pass</code>
+      连续输错会进入冷却（最长 30 秒），<b>冷却期内正确口令也会被拒</b> ——
+      看到"尝试过于频繁"就等半分钟再试。<br>
+      改口令 / 忘了口令，在服务器上执行：<br>
+      <code>node /srv/blog/repo/blog-enter/server/dev-server.mjs --set-pass</code>（改）<br>
+      <code>node /srv/blog/repo/blog-enter/server/dev-server.mjs --verify-pass</code>（只验，不触发冷却）<br>
+      <code>node /srv/blog/repo/blog-enter/server/dev-server.mjs --clear-pass</code>（清除）
     </p>
   </div>
 </section>
