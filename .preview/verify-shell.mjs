@@ -287,6 +287,36 @@ ok('收起态页脚只留箭头、文字收起', rail.backTextHidden === true &&
 await js(`window.SiteShell.nav.set(false); true`);
 await sleep(400);
 
+/* 侧边栏内容整体左移：内距 = 基准内距 - --ui-nav-shift，
+   而缩放键量的是 .nav 的**右**边缘，所以它一动不动。
+   这两条一起才是需求说的"除了缩放键以外都左移"。 */
+const shift = await js(`(function(){
+  var nav = document.querySelector('.nav');
+  var cs = getComputedStyle(nav);
+  var link = document.querySelector('.nav-link');
+  var rail = document.querySelector('.nav-rail');
+  var page = document.querySelector('.page');
+  var nr = nav.getBoundingClientRect();
+  var lr = link.getBoundingClientRect();
+  var rr = rail.getBoundingClientRect();
+  return { padLeft: Math.round(parseFloat(cs.paddingLeft) * 100) / 100,
+    /* 期望值要用**解析后**的基准：--g-rail 本身是 clamp(...) 的 token 文本，
+       parseFloat 拿不到数；而 .page 的右内距正是 var(--g-rail) 的解析值 */
+    railBase: Math.round(parseFloat(getComputedStyle(page).paddingRight) * 100) / 100,
+    shift: Math.round(parseFloat(cs.getPropertyValue('--ui-nav-shift')) * 100) / 100,
+    navL: nr.left, navR: nr.right, linkL: lr.left,
+    railInset: Math.round((nr.right - rr.right) * 100) / 100 };
+})()`);
+const wantPad = Math.max(0, shift.railBase - shift.shift);
+ok('侧边栏内容整体左移（内距 = 基准 rail − --ui-nav-shift）',
+  shift.shift >= 8 && Math.abs(shift.padLeft - wantPad) < 0.8,
+  JSON.stringify(shift) + ' expect=' + wantPad);
+ok('导航项确实跟着内距走（左边缘 = 侧边栏左内距）',
+  Math.abs(shift.linkL - shift.navL - shift.padLeft) < 1.5,
+  JSON.stringify({ linkL: shift.linkL, navL: shift.navL, padLeft: shift.padLeft }));
+ok('缩放键位置不受左移影响（它量的是侧边栏右边缘）',
+  Math.abs(shift.railInset - 14) < 1.5, 'railInset=' + shift.railInset);
+
 /* ------------------------------------------------------------
    B. 关于我：布局规整（含本轮修的邮箱锚点）
    ------------------------------------------------------------ */
@@ -549,6 +579,53 @@ ok('悬停有明显反馈（颜色变 + 抬起 2px）',
   hoverAfter.color !== hoverBefore.color && /matrix\(1, 0, 0, 1, 0, -2\)/.test(hoverAfter.transform),
   hoverBefore.name + '：' + hoverBefore.color + '/' + hoverBefore.transform + ' → ' + hoverAfter.color + '/' + hoverAfter.transform);
 
+/* 悬停分散：其余词让开，但**不许越界、不许重叠、不许动 left/top**
+   （此刻鼠标正停在上一步那一枚上，所以效果应当已经生效） */
+await sleep(420);   // 等 .3s 的位移过渡走完
+const scatter = await js(`(function(){
+  var host = document.querySelector('#tagCloud');
+  var cont = host.getBoundingClientRect();
+  var words = Array.prototype.slice.call(host.querySelectorAll('.tc-tag'));
+  var rects = words.map(function (w) { var b = w.getBoundingClientRect();
+    return { name: w.querySelector('.tc-name').textContent, t: w.style.transform || '',
+      l: b.left, t2: b.top, r: b.right, b2: b.bottom, pos: w.style.left + ',' + w.style.top }; });
+  var moved = rects.filter(function (r) { return r.t !== ''; }).length;
+  var overlaps = [];
+  for (var i = 0; i < rects.length; i++) for (var j = i + 1; j < rects.length; j++) {
+    var a = rects[i]; var c = rects[j];
+    var ox = Math.min(a.r, c.r) - Math.max(a.l, c.l);
+    var oy = Math.min(a.b2, c.b2) - Math.max(a.t2, c.t2);
+    if (ox > 1.5 && oy > 1.5) overlaps.push(a.name + '×' + c.name);
+  }
+  var outside = rects.filter(function (r) {
+    return r.l < cont.left - 1.5 || r.t2 < cont.top - 1.5 || r.r > cont.right + 1.5 || r.b2 > cont.bottom + 1.5; }).length;
+  var hovered = ${HOVER_SEL};
+  return { moved: moved, total: rects.length, overlaps: overlaps, outside: outside,
+    hoveredClean: (hovered.style.transform || '') === '',
+    innerMoved: moved > 0,
+    positions: rects.map(function (r) { return r.pos; }).join('|') };
+})()`);
+ok('悬停时其余词让开（至少两枚发生了位移）',
+  scatter.moved >= 2 && scatter.innerMoved === true, JSON.stringify(scatter).slice(0, 200));
+ok('被悬停的那一枚自身不移位（交给 CSS 的 :hover 抬起）', scatter.hoveredClean === true);
+ok('分散后仍不越界', scatter.outside === 0, 'outside=' + scatter.outside);
+ok('分散后词之间仍不重叠', scatter.overlaps.length === 0, scatter.overlaps.join(' | '));
+ok('分散只动 transform：left/top 逐字节不变（可逆、不累积漂移）',
+  scatter.positions === cloud.sizes.map((s) => s.left + ',' + s.top).join('|'),
+  'left/top 被改动了');
+
+/* 鼠标移开 → 全部复位 */
+await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 });
+await sleep(500);
+const reset = await js(`(function(){
+  var words = Array.prototype.slice.call(document.querySelectorAll('#tagCloud .tc-tag'));
+  return { dirty: words.filter(function (w) { return (w.style.transform || '') !== ''; }).length,
+    positions: words.map(function (w) { return w.style.left + ',' + w.style.top; }).join('|') };
+})()`);
+ok('鼠标移开后所有位移复位（且 left/top 依然没变）',
+  reset.dirty === 0 && reset.positions === cloud.sizes.map((s) => s.left + ',' + s.top).join('|'),
+  JSON.stringify({ dirty: reset.dirty }));
+
 /* 点抬头行的"全部"恢复完整列表 */
 await js(`document.querySelector('#cloudAll').click(); true`);
 await sleep(350);
@@ -728,6 +805,15 @@ await shot('shell-archive-collapsed.png', 1440, 1400);
 await js(`document.querySelector('#tagCloud .tc-tag[data-heat="hot"]').click(); true`);
 await sleep(400);
 await shot('shell-archive-filtered.png', 1440, 1100);
+/* 悬停分散的留档：把鼠标停在最大的那枚词上再拍一张 */
+const hov = await js(`(function(){ var t = document.querySelector('#tagCloud .tc-tag');
+  t.scrollIntoView({ block: 'center', behavior: 'instant' });
+  var b = t.getBoundingClientRect();
+  return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
+await sleep(300);
+await S('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hov.x, y: hov.y });
+await sleep(520);
+await shot('shell-archive-hover.png', 1440, 1000);
 await goto('/archive.html', 390, 1200);
 await shot('shell-archive-mobile.png', 390, 1200);
 

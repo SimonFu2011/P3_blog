@@ -37,6 +37,8 @@
   /* 侧边栏收起后的图标栏 */
   --ui-rail-w: 76px;
   --ui-rail-gap: clamp(18px, 3vw, 40px);
+  /* 侧边栏内容整体左移的量（缩放键不受影响，见 @media (min-width:981px) 里的说明） */
+  --ui-nav-shift: 16px;
 
   /* 字号档位：小标签 / 次级小字 */
   --ui-fs-xs: 11px;
@@ -130,6 +132,20 @@ body.skin-deep {
 @media (min-width: 981px) {
   .nav { transition: width .26s var(--ui-ease), padding-left .26s var(--ui-ease); }
   .page { transition: padding-left .26s var(--ui-ease); }
+
+  /* 侧边栏内容整体左移一点。
+     做法是收窄侧边栏的**左内距**，而不是改宽度或位移整块：
+       · 宽度不动 → 内容区右边界不变，于是右侧多出一点余量（那块统计原本
+         正好贴在右缘上，现在松一点）；
+       · 收起/展开按钮 .nav-rail 是绝对定位在 .nav 右上角的，它量的是 padding
+         box 的**右**边，所以左内距怎么改都与它无关 —— 这正好满足
+         "除了缩放键以外都左移"。
+     两种皮肤的左内距来源不同（浅底是 --g-rail，深水底是 pages.css 里那串
+     clamp），所以这里用一个统一的基准变量 + 回退值，减同一个偏移量。 */
+  .nav {
+    --ui-nav-pad: var(--g-rail, clamp(20px, 2.4vw, 40px));
+    padding-left: max(0px, calc(var(--ui-nav-pad) - var(--ui-nav-shift)));
+  }
 
   /* 收起 / 展开按钮：挂在 .nav 的右上角（.nav 是 fixed，它就是包含块） */
   .nav-rail {
@@ -452,7 +468,9 @@ body.is-settled .world .stats { opacity: .92; }
   letter-spacing: .01em;
   color: var(--ui-mute);
   cursor: pointer;
-  transition: color .18s ease, background .18s ease, transform .2s var(--ui-ease);
+  /* transform 的过渡比颜色长一点：悬停时其余词"让开"要有推开的观感，
+     太快会像瞬移（位移由 js/archive.js 的 scatterCloud 写在行内 style 上） */
+  transition: color .18s ease, background .18s ease, transform .3s var(--ui-ease);
 }
 .tc-tag[data-heat="warm"] { color: var(--ui-cyan); }
 .tc-tag[data-heat="hot"] { color: var(--ui-fg); }

@@ -397,6 +397,9 @@
     const restBox = $('#cloudRest');
     if (!host) return;
     const inner = cloudInner(host);
+    /* 重排前先清掉悬停分散留下的位移：位置要以 left/top 为唯一真相 */
+    clearScatter(host);
+    if (restBox) clearScatter(restBox);
 
     /* 先把上一轮退到兜底行里的词收回来：不收回的话，下一次重建会把它们
        连同兜底行一起清掉，那些标签就彻底消失了 */
@@ -405,6 +408,7 @@
         w.classList.remove('is-rest');
         w.style.left = '';
         w.style.top = '';
+        w.style.transform = '';
         inner.appendChild(w);
       });
       restBox.textContent = '';
@@ -491,6 +495,167 @@
     const tx = (W - bw * s) / 2 - minX * s;
     const ty = (H - bh * s) / 2 - minY * s;
     inner.style.transform = 'translate(' + tx.toFixed(2) + 'px, ' + ty.toFixed(2) + 'px) scale(' + s.toFixed(4) + ')';
+  };
+
+  /* ------------------------------------------------------------
+     悬停分散：鼠标停在一个词上时，其余词沿"远离它"的方向让开
+     ------------------------------------------------------------
+     三条硬约束（都是需求点名的）：
+       1) **不越界**：每个词的位移都夹在容器内（x ∈ [0, W-w]、y ∈ [0, H-h]）；
+       2) **不重叠**：被推开的词之间可能因此撞上，所以推完做几轮松弛 ——
+          沿"穿透更浅"的那个轴把它们分开，再夹一次边界；
+       3) **只动显示**：改的是 transform，不动 left/top —— 所以鼠标移开、
+          点词筛选、重新排布都不会留下"被推歪"的状态。
+     推力随距离衰减（越近让得越多），超出影响半径的词保持不动。
+     prefers-reduced-motion 下整个效果关闭。
+     ------------------------------------------------------------ */
+  const SCATTER_RADIUS = 96;    // 影响半径（还要加上悬停词自身尺寸的一半）
+  const SCATTER_MAX = 26;       // 最大推力（布局单位）
+  const SCATTER_ITER = 3;       // 松弛轮数
+
+  const clearScatter = (host) => {
+    const box = host || $('#tagCloud');
+    if (!box) return;
+    Array.prototype.forEach.call(box.querySelectorAll('.tc-tag'), (w) => { w.style.transform = ''; });
+  };
+
+  const scatterCloud = (hovered) => {
+    const host = $('#tagCloud');
+    if (!host || !hovered) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const inner = host.querySelector('.cloud-inner');
+    if (!inner) return;
+    const words = Array.prototype.slice.call(inner.querySelectorAll('.tc-tag'));
+    if (words.length < 2) return;
+    const W = host.clientWidth;
+    const H = host.clientHeight;
+    if (!W || !H) return;
+
+    /* 基准位置取 left/top（排布算出来的），**不取** getBoundingClientRect：
+       后者把整层缩放与上一次的位移一起算进去，效果会逐次累积漂移。 */
+    const base = [];
+    for (let i = 0; i < words.length; i += 1) {
+      const w = words[i];
+      const x = parseFloat(w.style.left);
+      const y = parseFloat(w.style.top);
+      if (!isFinite(x) || !isFinite(y)) return;   // 还没排布过：不做效果
+      base.push({ el: w, x: x, y: y, w: w.offsetWidth, h: w.offsetHeight });
+    }
+    const hi = words.indexOf(hovered);
+    if (hi < 0) return;
+
+    const hw = base[hi];
+    const hcx = hw.x + hw.w / 2;
+    const hcy = hw.y + hw.h / 2;
+    const R = SCATTER_RADIUS + Math.max(hw.w, hw.h) / 2;
+
+    const off = base.map(() => ({ dx: 0, dy: 0 }));
+    base.forEach((b, i) => {
+      if (i === hi) return;
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      let vx = cx - hcx;
+      let vy = cy - hcy;
+      let d = Math.sqrt(vx * vx + vy * vy);
+      if (d > R) return;                          // 太远：不动
+      if (d < 1) { vx = 1; vy = 0; d = 1; }       // 中心重合时给个确定方向
+      const push = SCATTER_MAX * (1 - d / R);
+      off[i].dx = (vx / d) * push;
+      off[i].dy = (vy / d) * push;
+    });
+
+    /* 边界要按**视觉**坐标算：整层还有一次等比放大 + 居中位移
+       （.cloud-inner 的 transform），布局坐标里的 [0, W] 并不等于眼睛看到的
+       [0, W]。不换算的话，放大后的词会被推到容器外面再被 overflow 裁掉 ——
+       那正是"不得超出范围"要避免的情况。
+       matrix(a, b, c, d, e, f)：a = scaleX、e/f = translateX/Y。 */
+    let zoom = 1;
+    let zoomTx = 0;
+    let zoomTy = 0;
+    const mt = /matrix\(([^)]+)\)/.exec(window.getComputedStyle(inner).transform);
+    if (mt) {
+      const parts = mt[1].split(',').map((v) => parseFloat(v));
+      zoom = parts[0] || 1;
+      zoomTx = parts[4] || 0;
+      zoomTy = parts[5] || 0;
+    }
+    const limitX = (0 - zoomTx) / zoom;             // 视觉左边 → 布局坐标
+    const limitY = (0 - zoomTy) / zoom;
+    const limitX2 = (W - zoomTx) / zoom;            // 视觉右边 → 布局坐标
+    const limitY2 = (H - zoomTy) / zoom;
+
+    const clampAll = () => {
+      base.forEach((b, i) => {
+        const mx = Math.max(limitX, limitX2 - b.w);
+        const my = Math.max(limitY, limitY2 - b.h);
+        const nx = Math.min(Math.max(b.x + off[i].dx, limitX), mx);
+        const ny = Math.min(Math.max(b.y + off[i].dy, limitY), my);
+        off[i].dx = nx - b.x;
+        off[i].dy = ny - b.y;
+      });
+    };
+    clampAll();
+
+    for (let it = 0; it < SCATTER_ITER; it += 1) {
+      for (let i = 0; i < base.length; i += 1) {
+        if (i === hi) continue;
+        for (let j = i + 1; j < base.length; j += 1) {
+          if (j === hi) continue;
+          const a = base[i];
+          const c = base[j];
+          const ax = a.x + off[i].dx;
+          const ay = a.y + off[i].dy;
+          const cx = c.x + off[j].dx;
+          const cy = c.y + off[j].dy;
+          /* 两个轴上的间隙：都小于 CLOUD_GAP 才算"撞上了" */
+          const gx = Math.max(ax - (cx + c.w), cx - (ax + a.w));
+          const gy = Math.max(ay - (cy + c.h), cy - (ay + a.h));
+          if (gx >= CLOUD_GAP || gy >= CLOUD_GAP) continue;
+          if (gx > gy) {
+            const d = (CLOUD_GAP - gx) / 2 + 0.5;
+            const s = (ax + a.w / 2) <= (cx + c.w / 2) ? -1 : 1;
+            off[i].dx += s * d;
+            off[j].dx -= s * d;
+          } else {
+            const d = (CLOUD_GAP - gy) / 2 + 0.5;
+            const s = (ay + a.h / 2) <= (cy + c.h / 2) ? -1 : 1;
+            off[i].dy += s * d;
+            off[j].dy -= s * d;
+          }
+        }
+      }
+      clampAll();
+    }
+
+    base.forEach((b, i) => {
+      if (i === hi) { b.el.style.transform = ''; return; }   // 悬停词本身交给 CSS 的 :hover
+      const dx = Math.round(off[i].dx * 10) / 10;
+      const dy = Math.round(off[i].dy * 10) / 10;
+      b.el.style.transform = (dx || dy) ? 'translate(' + dx + 'px, ' + dy + 'px)' : '';
+    });
+  };
+
+  const watchCloudHover = () => {
+    const host = $('#tagCloud');
+    if (!host) return;
+    let current = null;
+    const pick = (e) => (e.target && e.target.closest ? e.target.closest('.tc-tag') : null);
+    /* 用 mouseover 而不是 mouseenter：后者不冒泡，绑在容器上收不到子元素的事件 */
+    host.addEventListener('mouseover', (e) => {
+      const t = pick(e);
+      if (!t || t === current) return;
+      current = t;
+      scatterCloud(t);
+    });
+    host.addEventListener('mouseleave', () => { current = null; clearScatter(host); });
+    /* 键盘 Tab 到某个词上也给同样的反馈 */
+    host.addEventListener('focusin', (e) => {
+      const t = pick(e);
+      if (!t || t === current) return;
+      current = t;
+      scatterCloud(t);
+    });
+    host.addEventListener('focusout', () => { current = null; clearScatter(host); });
   };
 
   /* 容器尺寸变化后重排（防抖：侧边栏收起/展开的过渡会连打十几次 resize） */
@@ -632,6 +797,8 @@
     render();
     /* 排布依赖容器尺寸，所以要等真正布局完成后再接管尺寸变化 */
     watchCloud();
+    /* 悬停分散是纯显示效果，绑在容器上即可 */
+    watchCloudHover();
   };
 
   if (document.readyState === 'loading') {
