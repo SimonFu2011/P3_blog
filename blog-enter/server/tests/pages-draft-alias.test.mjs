@@ -332,19 +332,24 @@ test('详情页：缺少 slug 参数也是软 404，不会抛异常', () => {
 });
 
 /* ============================================================
-   回到"现有的 8 篇真实文章"上再验一次：不能因为新逻辑而看不到旧文章
+   回到"现有的真实文章"上再验一次：不能因为新逻辑而看不到旧文章
+   ------------------------------------------------------------
+   注意篇数**不写死**：写死会在每次新增/删除一篇文章时误报（真的发生过 ——
+   用户加了一篇之后这里报"8 篇"失败，看起来像功能坏了，其实只是断言过期）。
+   这里只断言"每一篇都可见、都能打开、都不是草稿"。
    ============================================================ */
-test('真实 posts.js：8 篇全部可见、每篇都能打开', async () => {
+test('真实 posts.js：现有文章全部可见、每篇都能打开', async () => {
   const src = await readFile(join(JS, 'posts.js'), 'utf8');
   const sandbox = { window: {} };
   vm.createContext(sandbox);
   new vm.Script(src).runInContext(sandbox);
   const real = sandbox.window.POSTS;
-  assert.equal(real.length, 8, '现有 8 篇');
+  assert.ok(Array.isArray(real) && real.length > 0, 'posts.js 应有文章');
   assert.ok(real.every((p) => !p.isDraft), '现有文章都不是草稿');
 
   const r = runArchive(real, '');
-  assert.equal(r.doc.querySelector('#totalCount').textContent, '8', '8 篇都要看得到');
+  assert.equal(r.doc.querySelector('#totalCount').textContent, String(real.length),
+    '归档页的计数应等于实际篇数');
 
   for (const p of real) {
     const a = runArticle(real, '?slug=' + encodeURIComponent(p.slug));
