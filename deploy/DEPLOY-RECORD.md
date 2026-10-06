@@ -176,6 +176,20 @@ sudo -u blog git -C /srv/blog/repo log --oneline -5
 
 ## 7. 踩过的坑（改法都已在代码里）
 
+0. **以 root 跑过 git → 自动提交失败 → 你以为保存成功但站点没变。**
+   `git` 以 root 身份执行会在 `.git/objects` 留下 root 拥有的目录，之后
+   `blog` 身份的自动提交写不进去：
+
+   ```
+   error: insufficient permission for adding an object to repository database .git/objects
+   ```
+
+   症状极具误导性：保存返回 **200**、内容确实进了工作区，但提交失败 →
+   工作区变脏 → 发布被"脏就报错"闸门拒绝 → **站点不变，而界面没说保存失败**。
+   修法：`bash deploy/bin/fix-repo-ownership.sh`（把整个仓库还给 `blog`）。
+   预防：**别用 root 在 `/srv/blog/repo` 里跑 git**；要跑就 `sudo -u blog git …`。
+   实证：修前 `.git` 里 110 个 root 文件，`blog` 提交必失败；修后 0 个，提交正常。
+
 1. **`--auto-publish` 跑的是旧脚本**：引导脚本把 `blog-publish.sh` 复制到
    `/usr/local/lib/p3blog/`，改仓库不生效。现在包装器直接执行仓库里那份
    （`install-publish-wrapper.sh`）。
