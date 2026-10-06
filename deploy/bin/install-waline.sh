@@ -8,7 +8,7 @@
 #
 # 它**不**负责的事（各自有主）：
 #   · nginx 反代 /comments/        → deploy/bt/nginx-locations.conf（贴伪静态）
-#   · 客户端资源 waline.js / .css  → blog-enter/comments/（随站点发布）
+#   · 客户端资源 waline.js / .css  → blog-enter/comments-assets/（随站点发布）
 #   · SMTP 授权码                  → 手工填 /etc/p3blog/waline.env，见 ADMIN.md
 #
 # 两个方案 E 里没写、但实测必须做的事（不做就是 500 / 裸奔）：
@@ -18,7 +18,10 @@
 #   2) **监听地址必须钉死在回环**。Waline(thinkjs) 默认 listen 0.0.0.0，
 #      实测 `ss -lntp` 看到的是 `*:8360` —— 那就绕过 nginx 裸奔了。
 #      办法是在 vanilla.js 旁边放一个 config.js（vanilla.js 会 require 它）。
-#      ⚠️ 重新 npm install @waline/vercel 会删掉这个文件，装完要重跑本脚本。
+#   3) **管理端的 window.serverURL 必须跟着当前地址走**（见第 5 步的 patch），
+#      否则经隧道打开后台时，登录口令会被 POST 到公网明文地址上 ——
+#      而"走隧道"的全部意义就是不让口令出本机。
+#      ⚠️ 重新 npm install @waline/vercel 会删掉上面两处改动，装完要重跑本脚本。
 # ============================================================
 set -euo pipefail
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -94,7 +97,31 @@ module.exports = {
 EOF
 chown blog:blog "$PKG/config.js"
 
-echo "== 5. 环境变量 $ENV_FILE（保留已有 JWT_TOKEN）=="
+echo "== 5. patch dashboard.js：管理端 API 跟着当前地址走 =="
+# 为什么必须 patch：/ui/ 页面里的 window.serverURL 是 Waline 用 ctx.serverURL
+# 拼的，而 SERVER_URL 必须是**公开地址**（邮件里的验证链接要用它）。于是经
+# SSH 隧道从 127.0.0.1:8360 打开后台时，管理端会把登录口令 POST 到公网明文
+# 地址上 —— 这正是隧道要避免的事。改成从当前地址派生：
+#   http://127.0.0.1:8360/ui/  → http://127.0.0.1:8360/api/    （隧道：全程本机）
+#   http://host/comments/ui/   → http://host/comments/api/     （经 nginx 也对）
+DASH="$PKG/src/middleware/dashboard.js"
+if grep -q "new URL('api/'" "$DASH"; then
+  echo "  已经 patch 过，跳过"
+else
+  cp -a "$DASH" "$DASH.orig"
+  python3 - "$DASH" <<'PY'
+import io, sys
+p = sys.argv[1]
+t = io.open(p, encoding='utf-8').read()
+old = "window.serverURL = '${ctx.serverURL}/api/';"
+new = "window.serverURL = new URL('api/', new URL('../', location.href)).href;"
+assert old in t, 'dashboard.js 里没有预期的 serverURL 那一行，放弃 patch'
+io.open(p, 'w', encoding='utf-8').write(t.replace(old, new, 1))
+print('  已 patch')
+PY
+fi
+
+echo "== 6. 环境变量 $ENV_FILE（保留已有 JWT_TOKEN）=="
 JWT=""
 if [ -f "$ENV_FILE" ]; then
   JWT="$(grep '^JWT_TOKEN=' "$ENV_FILE" | head -n 1 | cut -d= -f2- || true)"
@@ -137,7 +164,9 @@ GRAVATAR_STR=https://cdn.v2ex.com/gravatar/{{mail|md5}}
 MARKDOWN_TEX=false
 
 # ---- 评论后台的 JS 自托管（默认去 unpkg 拿，国内经常加载不出来）----
-WALINE_ADMIN_MODULE_ASSET_URL=/comments/waline-admin.js
+# 必须是**绝对地址**：后台只能经 SSH 隧道从 127.0.0.1:8360 打开，相对路径会
+# 解析到 Waline 自己身上（它没有静态文件路由）→ 404。
+WALINE_ADMIN_MODULE_ASSET_URL=$SITE_URL_VALUE/comments-assets/waline-admin.js
 
 # ---- 邮件（邮箱验证码）：填上就自动开启"注册/评论要验证码"----
 # 顺序不能反：先验通发信，再开 LOGIN=force。发不出信 = 谁也评论不了。
@@ -151,7 +180,7 @@ WALINE_ADMIN_MODULE_ASSET_URL=/comments/waline-admin.js
 EOF
 chmod 640 "$ENV_FILE"; chown root:blog "$ENV_FILE"
 
-echo "== 6. systemd unit =="
+echo "== 7. systemd unit =="
 cat > "$UNIT_FILE" <<EOF
 [Unit]
 Description=Waline comment server (loopback-only)
@@ -184,7 +213,7 @@ systemctl enable p3-waline >/dev/null 2>&1 || true
 systemctl restart p3-waline
 sleep 6
 
-echo "== 7. 自检 =="
+echo "== 8. 自检 =="
 systemctl is-active p3-waline
 echo "--- 监听（必须是 127.0.0.1:$PORT）---"
 ss -lntp | grep ":$PORT" || { echo "没有监听 $PORT" >&2; exit 1; }
@@ -196,7 +225,13 @@ echo "--- 数据 ---"
 ls -la "$DATA_DIR"
 echo
 echo "装完了。接下来："
-echo "  1) nginx：把 deploy/bt/nginx-locations.conf 的 P3_comments 段贴进伪静态，nginx -t && reload"
-echo "  2) 客户端：blog-enter/comments/ 随站点发布（blog-publish）"
-echo "  3) 管理员：SSH 隧道 ssh -L 8360:127.0.0.1:8360 后打开 http://127.0.0.1:8360/ui/ 注册"
-echo "     —— **第一个注册的账号就是管理员**，先把这一步做完再对外开放注册接口"
+echo "  1) nginx：把 deploy/bt/nginx-locations.conf 的 P3_comments 段贴进伪静态（整段 /comments/），"
+echo "     /www/server/nginx/sbin/nginx -t && nginx -s reload"
+echo "  2) 客户端：blog-enter/comments-assets/ 随站点发布（sudo -u blog blog-publish）"
+echo "  3) 管理员：ssh -L 8360:127.0.0.1:8360 root@43.108.100.116"
+echo "     然后本机开 http://127.0.0.1:8360/ui/ → 用户注册"
+echo "     —— **第一个注册的账号就是管理员**，先把这一步做完，再删掉伪静态里"
+echo "        那段临时的 location = /comments/api/user（它挡着公网注册）"
+echo "  注意：npm install @waline/vercel 会删掉本脚本写的 config.js 与 dashboard patch，"
+echo "        重装之后要重跑本脚本。"
+

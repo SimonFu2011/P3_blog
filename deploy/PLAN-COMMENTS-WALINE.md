@@ -8,15 +8,21 @@
 > **当前是「匿名可评 + 先审后发」**（`LOGIN=disable`），
 > 本方案选的「邮箱验证码」还**没开** —— 它要等 SMTP 授权码。
 >
-> **本文件下面有三处是错的/漏的，照抄会踩**（细节见 `DEPLOY-RECORD.md` §8.2）：
+> **本文件下面有五处是错的/漏的，照抄会踩**（细节见 `DEPLOY-RECORD.md` §8.2）：
 >
 > 1. **§4 漏了一步**：SQLite 必须先放官方 `assets/waline.sqlite` 结构文件，
 >    空库**不会**自建表 —— 读写全是 `no such table: wl_Comment`。
 > 2. **§4.4 只提醒没解决**：Waline 默认监听 `0.0.0.0`，实测确实是 `*:8360`。
 >    光看 `ss` 不够，得在 `vanilla.js` 旁边放 `config.js` 把 host 钉成回环。
-> 3. **§6.1 的 `proxy_pass` 写错了**：结尾少了 `/api/`，会把
+> 3. **§6.1 的 `proxy_pass` 写错了**：结尾少了 URI，会把
 >    `/comments/api/comment` 原样转上去 → 404（Waline 的接口前缀是 `/api/`）。
 >    另外那里应该用 `X-Forwarded-For $remote_addr` **覆盖**，而不是 append。
+> 4. **§6.1 只反代 `/comments/api/` 会漏路由**：Waline 还有 `/verification`
+>    （**邮件里的验证链接就指这里**）、`/token` 等根级路由。要**整段**反代
+>    `/comments/`，客户端静态资源挪到 `/comments-assets/`（否则被一起转走 → 404）。
+> 5. **§8.3 的隧道方案有个坑**：`/ui/` 页面里的 `window.serverURL` 是 Waline 用
+>    `SERVER_URL` 拼的绝对地址，隧道里点登录会把**口令 POST 到公网明文地址**上。
+>    要对 `src/middleware/dashboard.js` 做一行 patch，让它跟当前地址走。
 >
 > 还有一条本方案没预见到、真浏览器跑出来才发现的：**客户端默认会去 unpkg
 > 拉表情包**（`@waline/emojis`），所以 `init` 里要写 `emoji: false`

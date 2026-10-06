@@ -166,21 +166,40 @@ node blog-enter/server/dev-server.mjs --set-pass --pass "一串只有你知道�
 
 ```powershell
 ssh -L 8360:127.0.0.1:8360 root@43.108.100.116
-# 然后浏览器打开 http://127.0.0.1:8360/ui/
+# 保持这个窗口开着，然后浏览器打开：
+#   http://127.0.0.1:8360/ui/
 ```
+
+**为什么非要走隧道**：站点是纯 HTTP。管理端对公网开放的话，登录口令就是明文过网。
+隧道下页面、API、口令全程留在本机 —— 实测管理端那句
+`window.serverURL` 算出来是 `http://127.0.0.1:8360/api/`，`/api/token` 也确实打到本机。
+唯一从公网取的是那个 admin JS bundle（公开的开源文件，不含任何秘密），
+它的地址必须是**绝对地址**，写在服务器 `WALINE_ADMIN_MODULE_ASSET_URL` 里。
+
+> 这是 Waline 源码里的一处行为：它默认用 `SERVER_URL` 拼绝对地址，而 `SERVER_URL`
+> 必须是公开地址（邮件里的验证链接要用它）。所以 `deploy/bin/install-waline.sh`
+> 会对 `src/middleware/dashboard.js` 做一行 patch，让它跟着当前地址走。
+> **重装 `@waline/vercel` 会冲掉这个 patch**，症状是"隧道里点登录没反应/报错"，
+> 重跑一遍安装脚本即可。
 
 ### 8.2 第一个注册的账号就是管理员
 
 Waline 的约定：**第一个注册的用户自动成为管理员**。所以顺序是死的：
 
-1. 先用隧道打开 `/ui/` 注册（这一步**不能拖到对公网开放之后**）；
-2. 确认自己是管理员；
+1. 先用隧道打开 `http://127.0.0.1:8360/ui/` → 页面底部「用户注册」→ 注册
+   （这一步**不能拖到对公网开放之后**，否则可能被别人抢注）；
+2. 确认自己进得去后台、能看到评论列表；
 3. 才谈得上开放注册。
 
-在那之前，nginx 里有一段**临时**规则把 `POST/GET /comments/api/user` 也锁在回环
+在那之前，nginx 里有一段**临时**规则把 `/comments/api/user` 也锁在回环
 （伪静态里的 `location = /comments/api/user`）。**管理员注册完、要开放注册时，
 必须删掉那一段**，否则评论者永远注册不了。仓库里对应的模板是同名那段，
 见 `deploy/bt/nginx-locations.conf`。
+
+> 顺带：邮件里的验证链接指向 `/comments/verification`（现在整段 `/comments/` 都
+> 反代给 Waline，所以这个链接能通），验证完 Waline 会跳到 `/comments/ui/login` ——
+> 那个地址**只允许本机**，所以在公网浏览器里点完会看到 403。验证本身已经生效，
+> 不影响使用；要看登录页就从隧道进。
 
 ### 8.3 评论策略在两处，必须一致
 
@@ -202,11 +221,15 @@ Waline 用 `path` 把评论绑到文章地址上，本站写死成 `/article.htm
 （在 `article.html` 里）。所以**改 slug 之后，评论不会跟着走** —— 旧评论留在旧
 path 上，要么在 `/comments/ui/` 里手工改它，要么接受"改名 = 评论清零"。
 
-### 8.5 客户端资源是自托管的
+### 8.5 客户端资源是自托管的，但**不在** `/comments/` 下
 
-`waline.js` / `waline.css` / `waline-admin.js` 三个文件放在 `blog-enter/comments/`，
-随站点一起发布（版本、来源、升级方法见该目录的 `README.md`）。**不走 unpkg**：
-它挂了的话评论区是运行时一片空白，本地根本测不出来。
+`waline.js` / `waline.css` / `waline-admin.js` 三个文件放在
+**`blog-enter/comments-assets/`**，随站点一起发布（版本、来源、升级方法见该目录的
+`README.md`）。**不走 unpkg**：它挂了的话评论区是运行时一片空白，本地根本测不出来。
+
+目录名是 `comments-assets` 而不是 `comments`，因为 nginx 把**整段** `/comments/`
+反代给了 Waline —— 接口 `/comments/api/`、后台 `/comments/ui/`、邮件验证链接
+`/comments/verification` 都是它自己注册的路由。静态资源混在里面会被一起转走然后 404。
 
 ### 8.6 验证
 

@@ -215,29 +215,33 @@ sudo -u blog git -C /srv/blog/repo log --oneline -5
 
 ## 8. 评论区（Waline）—— 2026-10-06 实测
 
-方案是 `PLAN-COMMENTS-WALINE.md`（方案 E）。**它写的顺序基本对，但有三处是错的**，
+方案是 `PLAN-COMMENTS-WALINE.md`（方案 E）。**它写的顺序基本对，但有五处是错的/漏的**，
 下面按实测补上。装法已经沉淀成脚本：`bash deploy/bin/install-waline.sh`（幂等）。
 
 ### 8.1 现在长什么样
 
 ```
 浏览器 ──► nginx 43.108.100.116:80
-             ├─ /comments/api/…  ──► 127.0.0.1:8360  Waline（p3-waline.service）
-             ├─ /comments/ui/    ──► 只 allow 127.0.0.1；管理后台走 SSH 隧道
-             ├─ /comments/waline*.js|css ──► 静态文件（站点自己那份，自托管）
-             └─ 其余 ──► 静态站点，完全不受影响
+             ├─ /comments/…            ──► 127.0.0.1:8360  Waline（p3-waline.service）
+             │      含 /comments/api/、/comments/ui/、/comments/verification
+             ├─ /comments/ui/          ──► 只 allow 127.0.0.1（管理后台走 SSH 隧道）
+             ├─ /comments/api/user     ──► 临时只 allow 127.0.0.1（防管理员被抢注）
+             ├─ /comments-assets/*.js|css ─► 静态文件（评论客户端/后台 bundle，自托管）
+             └─ 其余                    ──► 静态站点，完全不受影响
+
+本机 ──ssh -L 8360──► 127.0.0.1:8360/ui/  管理后台（页面、API、口令全程不出本机）
 ```
 
 | 项 | 值 |
 | --- | --- |
 | 服务端 | `@waline/vercel` **1.43.4**，`/srv/waline/app`，systemd `p3-waline` |
-| 客户端 | `@waline/client` **3.16.0**（自托管在 `blog-enter/comments/`） |
-| 后台 UI | `@waline/admin` **0.36.0**（同上，路径写在 `WALINE_ADMIN_MODULE_ASSET_URL`） |
+| 客户端 | `@waline/client` **3.16.0**（自托管在 `blog-enter/comments-assets/`） |
+| 后台 UI | `@waline/admin` **0.36.0**（同上；地址写在 `WALINE_ADMIN_MODULE_ASSET_URL`，是绝对公网地址） |
 | 数据库 | `/srv/waline/data/waline.sqlite`（**仓库外**，`blog:blog` 640） |
 | 配置 | `/etc/p3blog/waline.env`（640 root:blog，含 `JWT_TOKEN`） |
 | 当前策略 | `LOGIN=disable`（匿名可评）+ `COMMENT_AUDIT=true`（先审后发）+ `IPQPS=60` |
 
-### 8.2 方案 E 里三处与实测不符的地方（照抄会踩）
+### 8.2 方案 E 里五处与实测不符的地方（照抄会踩）
 
 1. **SQLite 必须先放官方结构文件。** 空库不会自建表 —— 读写一律
    `{"errno":500,"errmsg":"no such table: wl_Comment"}`。官方文档
@@ -248,17 +252,32 @@ sudo -u blog git -C /srv/blog/repo log --oneline -5
    等于绕过 nginx 裸奔（限流、日志、`/ui/` 的 IP 限制全部失效）。
    修法：在 `vanilla.js` 旁边放 `config.js` 导出 `{ host: '127.0.0.1' }`
    （`vanilla.js` 在 `run()` 之后会 `require('./config.js')` 逐项 `think.config`）。
-   安装脚本会写这个文件；**重装 `@waline/vercel` 会删掉它，装完要重跑脚本**。
-3. **`proxy_pass` 结尾必须带 `/api/`。** 方案 E 写的是
+3. **`proxy_pass` 结尾必须带 `/`（剥前缀）。** 方案 E 写的是
    `proxy_pass http://127.0.0.1:8360;`（不带 URI）—— 那样
-   `/comments/api/comment` 会原样转发上去，Waline 的接口前缀是 `/api/`，
-   结果是 404。带 URI 才会把 `/comments` 前缀剥掉。
+   `/comments/api/comment` 会原样转发上去，而 Waline 的接口前缀是 `/api/`，结果 404。
    同一段里 `X-Forwarded-For` 用 `$remote_addr` **覆盖**而不是 append：
    thinkjs 开了 `proxy=true`，append 的话攻击者自带 XFF 就能伪造 IP 绕过 IPQPS。
+4. **只反代 `/comments/api/` 与 `/comments/ui/` 会漏路由。** 翻开 Waline 的
+   controller 才看到它还有 `/verification`（**邮件验证链接就指这里**）、`/token` 等
+   根级路由。漏掉 `/verification` 的后果是：用户点邮件里的验证链接直接 404。
+   所以改成**整段** `^~ /comments/` 反代，并把客户端静态资源挪到
+   `/comments-assets/`（否则会被一起转走然后 404）。
+5. **管理端经隧道打开时，`window.serverURL` 指向公网明文地址。** 它是 Waline 用
+   `SERVER_URL` 拼的，而 `SERVER_URL` 必须是公开地址（邮件链接要用），
+   于是隧道里点"登录"会把**口令 POST 到公网明文地址**上 —— 恰好是隧道要避免的事。
+   修法：install 脚本对 `src/middleware/dashboard.js` 做一行 patch，
+   让 `window.serverURL` 跟当前地址走。实测隧道下它算成
+   `http://127.0.0.1:18360/api/`，`/api/token` 确实打到本机。
+   admin bundle 的地址则必须是**绝对公网地址**（它只是静态文件，不含秘密）。
+
+> ⚠️ 第 2 与第 5 条都是对 `node_modules` 里文件的改动：
+> **重装 `@waline/vercel` 会冲掉它们**，装完要重跑 `deploy/bin/install-waline.sh`。
 
 另外一条方案没提、真浏览器才发现的：**客户端默认会去 unpkg 拉表情包**
 （`https://unpkg.com/@waline/emojis@1.1.0/...`）。本站零外部运行时依赖，
 所以 `init` 里写的是 `emoji: false`；要开就得把表情包也自托管。
+
+（评论区后台自己会去 `waline.js.org` 取一个 logo 图片，那是管理端的事，公开页面不受影响。）
 
 ### 8.3 验收（都跑过）
 
@@ -266,8 +285,12 @@ sudo -u blog git -C /srv/blog/repo log --oneline -5
 # 路由没被抢 / 站点没受影响
 for u in / /index.html /archive.html /article.html /about.html /404.html /js/posts.js; do
   printf '%-16s %s\n' "$u" "$(curl -s -o /dev/null -w '%{http_code}' http://43.108.100.116$u)"; done   # 全 200
-curl -s -o /dev/null -w '%{http_code}\n' http://43.108.100.116/_admin/       # 404（管理面没被带出去）
-curl -s -o /dev/null -w '%{http_code}\n' http://43.108.100.116/comments/ui/  # 403（只允许本机）
+for u in /comments-assets/waline.js /comments-assets/waline.css /comments-assets/waline-admin.js \
+         /comments/verification; do
+  printf '%-34s %s\n' "$u" "$(curl -s -o /dev/null -w '%{http_code}' http://43.108.100.116$u)"; done  # 全 200
+curl -s -o /dev/null -w '%{http_code}\n' http://43.108.100.116/_admin/        # 404（管理面没被带出去）
+curl -s -o /dev/null -w '%{http_code}\n' http://43.108.100.116/comments/      # 404（不给 Waline 演示页）
+curl -s -o /dev/null -w '%{http_code}\n' http://43.108.100.116/comments/ui/   # 403（只允许本机）
 curl -s -H 'Referer: http://43.108.100.116/article.html' \
      'http://43.108.100.116/comments/api/comment?path=/article.html' | head -c 120   # JSON，不是 404
 ss -lntp | grep 8360        # 必须 127.0.0.1:8360
@@ -280,6 +303,11 @@ node blog-enter/server/tests/verify-comments-live.mjs   # 真浏览器 15 项全
 端到端发一条：真浏览器在文章页填昵称邮箱 → 提交 → 页面出现"评论正在审核中
 （当前仅自己可见）"，接口 200，`wl_Comment` 里 `status=waiting`，
 region 正确（说明 XFF 传对了）。这条测试评论已从库里删掉。
+
+评论后台也真浏览器验过（`ssh -L 18360:127.0.0.1:8360` 后打开
+`http://127.0.0.1:18360/ui/`）：登录页渲染正常、无控制台报错，
+`window.serverURL` 是 `http://127.0.0.1:18360/api/`，`/api/token` 打在本机，
+全页只有 admin bundle 一个文件来自公网。
 
 ### 8.4 还没做的（下一步）
 

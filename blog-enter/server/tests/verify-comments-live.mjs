@@ -170,14 +170,16 @@ console.log('');
 console.log('1) 存在的文章');
 await goto(SITE + '/article.html?slug=' + encodeURIComponent(SLUG), 1200);
 
-const articleOk = await js(`!!(window.Article && window.Article.slug)`);
-ok('正文渲染成功（window.Article 已就绪）', articleOk,
-  JSON.stringify(await js(`window.Article ? window.Article.slug : null`)));
-
 const widget = await waitForWidget(20000);
 ok('Waline 面板渲染进 #commentsMount', !!widget && widget.panel, JSON.stringify(widget));
 ok('评论输入框存在', !!widget && widget.editor, JSON.stringify(widget));
 if (widget) ok('评论区可见（不是 hidden）', widget.comments);
+
+/* 先等面板出来再断言 window.Article：客户端要下 300KB 的 bundle，缓存又是关的，
+   冷启动时 1200ms 可能还没跑完 —— 先断言会读到"还没就绪"的中间态（踩过一次）。 */
+ok('正文渲染成功（window.Article 已就绪）',
+  await js(`!!(window.Article && window.Article.slug)`),
+  JSON.stringify(await js(`window.Article ? window.Article.slug : null`)));
 
 /* 顺带守住一个已经踩过的坑：`.notfound-box{display:grid}` 会把 hidden 打穿，
    于是每篇文章页底部都挂着"NOT FOUND / 这篇文章不存在"。看属性不够，要看计算值。 */
@@ -186,7 +188,8 @@ ok('文章存在时"文章不存在"那一块是真藏的（hidden 没被 CSS �
 
 const apiHits = requests.filter((u) => u.includes('/comments/api/'));
 ok('客户端确实请求了评论接口', apiHits.length > 0, JSON.stringify(apiHits.slice(0, 3)));
-const bundleHits = requests.filter((u) => u.includes('/comments/waline.'));
+/* 客户端资源在 /comments-assets/：/comments/ 那一段整段反代给 Waline 了 */
+const bundleHits = requests.filter((u) => /\/comments-assets\/waline\./.test(u));
 ok('自托管客户端资源被加载', bundleHits.length >= 2, JSON.stringify(bundleHits));
 /* 按 hostname 比，不按前缀比：Chrome 会先把 http 升级成 https 试一次，
    同一台机器上会同时出现两种写法的同源请求。 */
