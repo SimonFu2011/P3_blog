@@ -1,0 +1,44 @@
+[Unit]
+Description=P3_blog tunnel proxy (injects X-Admin-Proxy-Secret so SSH tunnels can reach the admin UI)
+Documentation=file:/srv/blog/repo/deploy/DEPLOY-RECORD.md
+After=network.target p3-admin.service
+Wants=p3-admin.service
+
+[Service]
+Type=simple
+User=blog
+Group=blog
+WorkingDirectory=/srv/blog/repo
+
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+UMask=0077
+
+# 环回入口（8848，ssh -L 的目标）→ 后台进程（8849）
+#   --secret-file  浏览器走隧道时无法自带 X-Admin-Proxy-Secret，这一层负责注入
+#   --public-host  把 Host 改写成后台白名单里的公网名。隧道过来的 Host 是
+#                  "127.0.0.1:8848"，而后台监听 8849，它的主机校验里有一条
+#                  "回环名必须等于本次监听端口"，不改写就会 403。
+ExecStart=/usr/local/bin/node /srv/blog/repo/blog-enter/server/tunnel-proxy.mjs \
+  --listen 8848 \
+  --target 8849 \
+  --secret-file /etc/p3blog/proxy-secret \
+  --public-host 43.108.100.116
+
+Restart=on-failure
+RestartSec=3
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/etc/p3blog /srv/blog/repo
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
