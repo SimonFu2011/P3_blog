@@ -104,7 +104,7 @@
     <section class="comments" id="comments" hidden aria-labelledby="commentsTitle">
       <div class="comments-head">
         <h2 class="section-title" id="commentsTitle">COMMENTS<span class="st-cn">评论</span></h2>
-        <span class="section-note" id="commentsNote">Waline</span>
+        <span class="section-note" id="commentsNote">Waline · 先审后发</span>
       </div>
       <div class="comments-box" id="commentsBox">
         <!-- 评论服务挂载点：内容由 comments/waline.js 注入 -->
@@ -214,6 +214,9 @@
              服务端 force 而这里 disable → 提交时才报错；反过来 → 白让登录。 */
           login: 'disable',
           requiredMeta: ['nick', 'mail'],
+          /* 服务端 COMMENT_AUDIT=true（先审后发）时，作者自己看得到自己的评论并带
+             "审核中"提示，别人看不到。这里在输入框里先说一句，省得评论者以为发丢了。 */
+          locale: { placeholder: '想说点什么？（新评论需审核后公开）' },
           imageUploader: false,   /* 关掉上传入口；服务端没有对应开关 */
           search: false,          /* 表情搜索会去请求 giphy，关掉更干净 */
           emoji: false,           /* ← 默认表情包是 unpkg 上的 @waline/emojis：
