@@ -16,15 +16,6 @@
 window.POSTS = [
 
   {
-  slug: 'test',
-  title: 'test',
-  date: '2026-10-06',
-  category: '随笔',
-  tags: ['现代诗'],
-  body: '<p>test</p>\n<figure>\n  <img src="img/uploads/明日方舟立绘-凯尔希-1.webp" alt="明日方舟立绘_凯尔希_1.jpg" width="720" height="380">\n  <figcaption></figcaption>\n</figure>\n'
-},
-
-  {
   slug: 'post-20261006',
   title: '无题',
   date: '2026-10-06',
