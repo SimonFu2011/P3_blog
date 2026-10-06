@@ -343,14 +343,24 @@ body.skin-deep {
 }
 .nav .stats-kicker { grid-column: 1; }
 .nav .stats-src { grid-column: 2; margin-left: 0; text-align: right; }
+/* 三个指标竖排成一列：每行是"标签 + 固定间距 + 数值"。
+   为什么不用两列并排：侧边栏内容宽只有 ~250px，两个格子各占一半之后，
+   第二个格子里的标签会被推到离第一个数值很远的地方 —— 看着像表格对不齐；
+   竖排之后标签占固定宽度，三个数值落在同一列上，间距也就真正统一了。 */
 .nav .stats-list {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 4px 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
   margin: 6px 0 0;
 }
-.nav .stat { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+/* 标签与数值是**一对**：固定 6px 间距挨着放。
+   不能用 justify-content: space-between —— 那会把标签顶到格子左边、数值顶到
+   格子右边，于是"今日访问量 …… 10"被拉得很开，各项间距还各不相同。 */
+.nav .stat { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+/* 标签占固定宽度（5.8em ≈ 五个中文字 + 字距）：这样"访客数"这类短标签也占
+   同样宽，三个数值的起点就能对齐成一列，"间隔统一"才真的成立 */
+.nav .stat:not(.is-main) .stat-k { flex: 0 0 auto; min-width: 5.8em; white-space: nowrap; }
 /* 主指标：标签在上、数字在下，整行独占 */
 .nav .stat.is-main { grid-column: 1 / -1; display: grid; gap: 1px; }
 .nav .stat-v { font-size: 15px; }

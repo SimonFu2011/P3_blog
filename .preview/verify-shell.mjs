@@ -395,6 +395,26 @@ ok('主指标明显更大（总访问量字号 > 其余两项）',
   p.stats.mainFont >= 22 && p.stats.mainFont > p.stats.subFont + 4,
   'main=' + p.stats.mainFont + 'px sub=' + p.stats.subFont + 'px');
 
+/* 子指标：标签与数值是"一对"，间距必须统一且贴近，且两个数值起点对齐。
+   以前用 space-between，标签和数字被顶到格子两端 —— 间距大、两格还不一样。 */
+const pair = await js(`(function(){
+  return Array.prototype.map.call(document.querySelectorAll('.nav .stat:not(.is-main)'), function (c) {
+    var k = c.querySelector('.stat-k').getBoundingClientRect();
+    var v = c.querySelector('.stat-v').getBoundingClientRect();
+    return { label: c.querySelector('.stat-k').textContent,
+      gap: Math.round((v.left - k.right) * 10) / 10, vLeft: Math.round(v.left * 10) / 10 };
+  });
+})()`);
+const gaps = pair.map((x) => x.gap);
+const vLefts = pair.map((x) => x.vLeft);
+ok('子指标的"标签 → 数值"间距统一且贴近（≤10px，两项相差 ≤1px）',
+  gaps.length >= 2 && (Math.max.apply(null, gaps) - Math.min.apply(null, gaps)) <= 1
+  && Math.max.apply(null, gaps) <= 10,
+  JSON.stringify(pair));
+ok('两个数值的起点对齐成一列',
+  vLefts.length >= 2 && (Math.max.apply(null, vLefts) - Math.min.apply(null, vLefts)) <= 1,
+  JSON.stringify(vLefts));
+
 /* 侧边栏只有 ~235px 可用内容宽：这一块必须连**内部元素**都不越界
    （测的是每个后代的最右边缘，不是外层盒子的宽 —— 盒子内溢出一样是问题） */
 const fit = await js(`(function(){
