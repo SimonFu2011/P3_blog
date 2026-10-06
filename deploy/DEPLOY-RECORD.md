@@ -16,8 +16,54 @@
 | 后台服务 | `p3-admin.service`，`active`，**只监听 `127.0.0.1:8848`** |
 | 认证 | 口令（PBKDF2-SHA256 210k）＋ 每客户端会话 cookie ＋ UA/IP 网段绑定 |
 | 反代 | **未开启**。nginx 里 `/_admin/` 仍是 `return 404` |
-| 公网暴露面 | `22` 开、`80` 开、`443` 关、**`8848` 与 `8888` 均不可达** |
+| 公网暴露面 | `22` 开、`80` 开、`443` 关、**`8848` 不可达**；<br>`8888`（宝塔面板）在 **iptables 层限制为「本机 + 白名单 IP」** |
+| SSH 认证 | **仅密钥**（`PasswordAuthentication no`、`PermitRootLogin prohibit-password`、`MaxAuthTries 3`） |
+| 入侵防护 | **fail2ban** 已装并在跑（sshd jail：3 次失败 → 封 24 小时） |
 | Node | v22.12.0（`/usr/local/bin/node`） |
+
+### 1.1 SSH 与防火墙加固（因正在被爆破而做）
+
+**起因**：`/var/log/secure` 里发现规模化 SSH 爆破 —— 单 IP 24 小时内约 1000 次尝试，
+来源轮流出现在 `109.160.32.0/24` 等网段，用户名从 `s10femi`、`frontend`、`SJ05`
+等字典里轮换。当时的状态是 `PasswordAuthentication yes` + `PermitRootLogin yes`
++ **没有 fail2ban** —— 也就是说这波爆破**是能够成功的**。
+
+| 动作 | 效果 |
+| --- | --- |
+| `/etc/ssh/sshd_config` 追加加固段（含回滚说明） | 只剩密钥登录；实测口令登录被拒：`Permission denied (publickey,...)` |
+| iptables 丢弃 `109.160.32.0/24` | 该网段直接在内核层被丢 |
+| iptables 限制 `8888`：仅回环 + 白名单 | 宝塔面板不再对公网开放 |
+| 安装并启用 fail2ban（sshd jail） | 实测爆破从 **92 次/2 分钟 → 3 次/2 分钟** |
+
+**为什么用 iptables 而不是 firewalld**：宝塔面板在 `11:40:15` 把 firewalld 停掉并禁用了
+（`disabled`），面板自己管防火墙。所以规则必须落在 iptables 上。持久化用自建单元
+`/etc/systemd/system/p3-firewall.service`（开机 `iptables-restore /etc/p3blog/iptables.rules`），
+**已验证**：清空规则后 `systemctl reload p3-firewall` 能完整恢复。
+
+**换网络后 8888 打不开怎么办**：白名单里的 IP 是写死的，家宽 IP 变了就进不去面板。
+
+```bash
+p3-allow-8888            # 看当前白名单
+p3-allow-8888 add        # 把当前 SSH 来源 IP 加进去
+p3-allow-8888 add 1.2.3.4
+p3-allow-8888 del 1.2.3.4
+p3-allow-8888 reset      # 只留回环（最严）
+```
+
+**更省事的办法**——回环永远放行，走隧道就不用管白名单：
+
+```powershell
+ssh -L 8888:127.0.0.1:8888 root@43.108.100.116
+# 本机浏览器开 http://127.0.0.1:8888
+```
+
+**回滚 SSH 加固**：删掉 `sshd_config` 里 `===== BEGIN/END hardening =====` 之间的段落，
+取消被注释的 `PasswordAuthentication` / `PermitRootLogin` 两行，`systemctl restart sshd`。
+改前备份在 `/etc/ssh/sshd_config.bak-2026-10-06-1153`。
+
+> ⚠️ fail2ban 的白名单在 `/etc/fail2ban/jail.d/p3-ignoreip.local`，里面也写了你的出口 IP。
+> 换网络后同样要更新，否则可能被自己封掉 —— **这个坑已经踩过一次**：服务器的公网 IP
+> 因为"连自己失败"被封了，已解封并加入白名单。
 
 ### 为什么反代故意没开
 
