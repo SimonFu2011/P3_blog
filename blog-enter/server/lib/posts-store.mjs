@@ -161,20 +161,60 @@ const entrySpans = (source, open, close) => {
 const SANDBOX_LIMIT_MS = 2000;
 
 /**
- * 把整份 posts.js 放进空沙箱执行，取回 window.POSTS。
- * timeout 挡住"死循环写出"这类意外；沙箱里没有任何宿主对象。
+ * 把整份 posts.js 放进 vm 上下文执行，取回 window.POSTS。
+ *
+ * ⚠️ **这不是安全边界，别把它当沙箱。** 实测（Node 22/24）：
+ *      window.constructor.constructor("return process")().version  →  能拿到宿主 process
+ *      window.__proto__.X = 1  →  污染的是**宿主**的 Object.prototype
+ *    原因是把宿主对象（`{}`、`console.log`）递进了上下文，它们的
+ *    `.constructor.constructor` 就是宿主 Function。`codeGeneration.strings:false`
+ *    拦不住这条；vm 模块本身也**不承诺**能当安全边界。
+ *
+ * 它在真实拓扑里够用的理由：写入 posts.js 的唯一途径是本进程自己的
+ * `jsString`/`serializePost`（转义正确），没有任何 API 能塞进任意 JS。
+ * 要真正隔离，得换成子进程 + 权限模型，或者干脆用解析器而不是 eval。
+ *
+ * 即便不是边界，下面这几件事也**必须**做对（都是实测踩出来的）：
+ *   1) 上下文里的对象在**上下文内部**构造，不要把宿主对象递进去；
+ *   2) 结果在**上下文内部** JSON 序列化后再交回宿主 —— 否则 window.POSTS 里
+ *      的一个 getter/Proxy 会在宿主侧的每次属性读取时执行，**不受 timeout 约束**
+ *      （死循环就等于永久挂住进程）。放进脚本里做，timeout 才罩得住它。
  */
 export const evaluatePosts = (source) => {
-  const sandbox = { window: {}, console: { log() {}, warn() {}, error() {} } };
-  const context = vm.createContext(sandbox, { codeGeneration: { strings: false, wasm: false } });
+  let context;
   try {
+    context = vm.createContext(Object.create(null), {
+      codeGeneration: { strings: false, wasm: false }
+    });
+    /* 这一切都在上下文内部执行：window / console 是**上下文自己的**对象
+       （Object.create(null) 没有原型链，拿不到 constructor 这条路），
+       并且把 JSON 冻住，防止被替换掉之后在宿主侧执行。 */
+    new vm.Script(`
+      this.window = Object.create(null);
+      this.console = Object.freeze({ log() {}, warn() {}, error() {}, info() {}, debug() {} });
+      this.globalThis.window = this.window;
+      Object.freeze(this.console);
+      if (this.JSON) { Object.freeze(this.JSON.stringify); Object.freeze(this.JSON.parse); }
+    `, { filename: 'sandbox-boot.js' }).runInContext(context, { timeout: SANDBOX_LIMIT_MS });
+
     new vm.Script(source, { filename: 'posts.js' }).runInContext(context, { timeout: SANDBOX_LIMIT_MS });
+
+    /* 关键：序列化也在上下文里、同一个 timeout 之下完成 */
+    const json = new vm.Script(
+      'JSON.stringify(this.window.POSTS === undefined ? null : this.window.POSTS)',
+      { filename: 'sandbox-read.js' }
+    ).runInContext(context, { timeout: SANDBOX_LIMIT_MS });
+
+    if (json === 'null' || json === undefined) {
+      throw new HttpError(422, 'posts.js 没有产出 window.POSTS 数组');
+    }
+    const posts = JSON.parse(json);
+    if (!Array.isArray(posts)) throw new HttpError(422, 'posts.js 没有产出 window.POSTS 数组');
+    return posts;
   } catch (err) {
+    if (err instanceof HttpError) throw err;
     throw new HttpError(422, 'posts.js 求值失败：' + err.message);
   }
-  const posts = sandbox.window.POSTS;
-  if (!Array.isArray(posts)) throw new HttpError(422, 'posts.js 没有产出 window.POSTS 数组');
-  return posts;
 };
 
 /* ------------------------------------------------------------

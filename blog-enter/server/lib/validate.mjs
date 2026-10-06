@@ -51,7 +51,46 @@ const FORBIDDEN_TAGS = new Set(['script', 'style', 'iframe', 'frame', 'frameset'
   'applet', 'form', 'input', 'textarea', 'select', 'option', 'button', 'base', 'link', 'meta',
   'template', 'slot', 'noscript', 'animate', 'set', 'foreignobject', 'use', 'math', 'svg']);
 
-const FORBIDDEN_URL = /^\s*(?:javascript|vbscript|data)\s*:/i;
+/* ------------------------------------------------------------
+   URL 判定：先归一化，再比对
+   ------------------------------------------------------------
+   为什么不能直接对原文做正则（这是实测踩出来的）：
+     '<a href="&#106;avascript:alert(1)">'  实体解码后才是 javascript:
+     '<a href="java\nscript:alert(1)">'     URL 解析器会剥掉换行
+     '<a href="\u0000javascript:...">'      前导 C0 控制字符同样被剥掉
+   这三条**都骗过了原来那条正则**（实测全部放行）。所以顺序必须是：
+   解码实体 → 去掉全部 ASCII 控制字符与空白 → 再去判协议。
+   ------------------------------------------------------------ */
+const decodeEntities = (s) => {
+  let out = '';
+  for (let i = 0; i < s.length; i += 1) {
+    const c = s[i];
+    if (c !== '&') { out += c; continue; }
+    const semi = s.indexOf(';', i + 1);
+    if (semi < 0 || semi - i > 12) { out += c; continue; }
+    const body = s.slice(i + 1, semi);
+    let ch = null;
+    if (/^#[0-9]+$/.test(body)) ch = String.fromCodePoint(Number(body.slice(1)));
+    else if (/^#x[0-9a-f]+$/i.test(body)) ch = String.fromCodePoint(parseInt(body.slice(2), 16));
+    else {
+      const named = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", tab: '\t', newline: '\n', colon: ':' };
+      const k = body.toLowerCase();
+      if (Object.prototype.hasOwnProperty.call(named, k)) ch = named[k];
+    }
+    if (ch === null) { out += c; continue; }
+    out += ch;
+    i = semi;
+  }
+  return out;
+};
+
+/** 归一化一个待判定的 URL 值 */
+const normalizeUrlValue = (raw) => decodeEntities(String(raw))
+  .replace(/[\u0000-\u0020\u007f]/g, '')   // 控制字符 + 空白，一律剥掉
+  .trim();
+
+const FORBIDDEN_URL = /^(?:javascript|vbscript|data)\s*:/i;
+const isForbiddenUrl = (raw) => FORBIDDEN_URL.test(normalizeUrlValue(raw));
 
 /* 结束标签在 HTML5 里可省略的标签 */
 const IMPLICIT_CLOSE = new Set(['li', 'dt', 'dd', 'tr', 'td', 'th', 'thead', 'tbody',
@@ -159,6 +198,67 @@ export const validatePost = (input, existing, opts) => {
    正文 HTML 检查
    ------------------------------------------------------------ */
 
+/* ------------------------------------------------------------
+   标签扫描：**手写线性分词器**，不用正则
+   ------------------------------------------------------------
+   原来这里是一条正则：
+     /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^>])*?)(\/?)>/g
+   它有两个实测出来的严重问题：
+
+   1) **ReDoS**（指数回溯）。`(?:"…"|'…'|[^>])*?` 是歧义量词，输入里没有 `>`
+      时回溯爆炸。实测：`<a ` + N 个双引号，N=40（43 字节）耗时 1288ms，
+      N=44（47 字节）到 8485ms。Node 是单线程，一个 5MB 的上传就够把整台
+      服务打到不响应；而正文上限是 40 万字符 —— 等于没有上限。
+
+   2) **未闭合标签绕过**。正则要求结尾有 `>`，于是 `<img src=x onerror=alert(1)`
+      （注意：没有 `>`）**整条正则匹配不上**，属性根本没被检查，校验通过。
+      而浏览器在 EOF 处会把未闭合的标签照样发出来 —— 事件属性就执行了。
+
+   手写扫描器一次遍历、无回溯，并把"未闭合的 <"当成错误而不是跳过。
+   ------------------------------------------------------------ */
+const tokenizeTags = (text) => {
+  const tags = [];
+  let unterminated = null;
+  const n = text.length;
+  let i = 0;
+
+  while (i < n) {
+    const lt = text.indexOf('<', i);
+    if (lt < 0) break;
+    let j = lt + 1;
+
+    /* 属性区里允许出现 `>`：<a title="a>b"> 是合法的 */
+    let closing = false;
+    if (text[j] === '/') { closing = true; j += 1; }
+
+    const nameStart = j;
+    while (j < n && /[a-zA-Z0-9-]/.test(text[j])) j += 1;
+    const name = text.slice(nameStart, j);
+    /* 不是标签的样子（`<` 后既不是字母也不是 /）：当普通文本，继续往后找 */
+    if (!name) { i = lt + 1; continue; }
+
+    let quote = null;
+    let end = -1;
+    let k = j;
+    for (; k < n; k += 1) {
+      const c = text[k];
+      if (quote) { if (c === quote) quote = null; continue; }
+      if (c === '"' || c === "'") { quote = c; continue; }
+      if (c === '>') { end = k; break; }
+    }
+    if (end < 0) { unterminated = text.slice(lt, Math.min(n, lt + 40)); break; }
+
+    const attrText = text.slice(j, end);
+    const selfClosing = /\/\s*$/.test(attrText);
+    tags.push({
+      closing, name, selfClosing,
+      attrText: selfClosing ? attrText.replace(/\/\s*$/, '') : attrText
+    });
+    i = end + 1;
+  }
+  return { tags, unterminated };
+};
+
 const parseAttrs = (raw) => {
   const attrs = [];
   const re = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*(?:=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+))?/g;
@@ -172,11 +272,9 @@ const parseAttrs = (raw) => {
   return attrs;
 };
 
-const TAG_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^>])*?)(\/?)>/g;
-
 /**
  * 返回 { ok, errors, warnings, tags }
- * 检查项：禁用标签、未知标签、事件属性、危险 URL、标签闭合顺序。
+ * 检查项：禁用标签、未知标签、事件属性、危险 URL、标签闭合顺序、未闭合标签。
  */
 export const inspectHtml = (html) => {
   const errors = [];
@@ -189,12 +287,19 @@ export const inspectHtml = (html) => {
   if (/<!\[CDATA\[/.test(text)) errors.push('正文里不允许 CDATA 段');
   if (/<\?/.test(text)) errors.push('正文里不允许处理指令（<? ?>）');
 
-  let m;
-  TAG_RE.lastIndex = 0;
-  while ((m = TAG_RE.exec(text))) {
-    const closing = m[1] === '/';
-    const name = m[2].toLowerCase();
-    const attrs = parseAttrs(m[3] || '');
+  const { tags, unterminated } = tokenizeTags(text);
+
+  /* 未闭合的标签必须报错：浏览器在 EOF 处会把它照样发出来，
+     于是没被检查到的属性（例如 onerror）就会执行。这就是实测过的绕过。 */
+  if (unterminated) {
+    errors.push('正文里有一个没有闭合的标签：' + JSON.stringify(unterminated)
+      + '… —— 标签必须有结束的 ">"，否则里面的属性不会被检查');
+  }
+
+  for (const t of tags) {
+    const closing = t.closing;
+    const name = t.name.toLowerCase();
+    const attrs = parseAttrs(t.attrText || '');
 
     if (FORBIDDEN_TAGS.has(name)) {
       errors.push('不允许使用 <' + name + '> 标签');
@@ -209,14 +314,17 @@ export const inspectHtml = (html) => {
       if (/^on/i.test(a.name)) errors.push('<' + name + '> 上不允许事件属性 ' + a.name);
       if (a.name === 'style') errors.push('<' + name + '> 上不允许 style 属性（样式请写进 CSS 文件）');
       if (a.name === 'srcdoc') errors.push('<' + name + '> 上不允许 srcdoc 属性');
-      if (a.name === 'href' && a.value && FORBIDDEN_URL.test(a.value)) {
+      /* 协议判定必须走 isForbiddenUrl：它先解码 HTML 实体、再剥掉控制字符。
+         直接对原文做正则会漏掉 &#106;avascript: / java\nscript: / NUL 前缀
+         这三种（都实测放行过）。 */
+      if (a.name === 'href' && a.value && isForbiddenUrl(a.value)) {
         errors.push('<' + name + '> 的 href 不允许 javascript:/vbscript:/data: 协议');
       }
       /* 图片只允许站内相对路径与 http(s)：src 用 data: 会绕过图片上传，
          而且体积不可控。 */
       if (a.name === 'src' && a.value) {
-        const v = a.value.trim();
-        if (FORBIDDEN_URL.test(v) && !/^data:image\//i.test(v)) {
+        const v = normalizeUrlValue(a.value);
+        if (isForbiddenUrl(a.value) && !/^data:image\//i.test(v)) {
           errors.push('<' + name + '> 的 src 不允许 ' + v.slice(0, 24) + '… 这种协议');
         }
       }
@@ -241,7 +349,7 @@ export const inspectHtml = (html) => {
       continue;
     }
 
-    if (VOID_TAGS.has(name) || m[4] === '/') continue;
+    if (VOID_TAGS.has(name) || t.selfClosing) continue;
 
     /* 隐式闭合：这些标签的结束标签在 HTML5 里本来就"可以省略"。
        不处理它们，写一个朴素的 <ul><li>a<li>b</ul> 就会被判成漏闭合。

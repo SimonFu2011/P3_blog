@@ -70,13 +70,26 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 3
 fi
 
-git fetch --prune origin
-# 只快进，不 reset：本地分支落后就前进，分叉或领先就报错让人看
-git checkout -q "$BRANCH" 2>/dev/null || git checkout -q -b "$BRANCH" "origin/$BRANCH"
-if ! git merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
-  echo "拒绝发布：本地 $BRANCH 无法快进到 origin/$BRANCH（有本地提交或已分叉）。" >&2
-  echo "  先在服务器上看 git log --oneline --graph --all，人工处理。" >&2
-  exit 3
+# ------------------------------------------------------------
+# 【不要因为连不上 GitHub 就什么都不发布】
+# ------------------------------------------------------------
+# 服务器常常连不上 GitHub（国内网络、只走 SSH、或纯手工同步）。
+# 原来 fetch/checkout/reset 三连在 set -e 下任何一步失败都会让脚本**提前退出**，
+# 结果是"rsync 根本没跑"，管理页保存后表现成"发布失败"。
+# 现在：git 只是"尽力把代码对齐到远端"，对齐不了就明确警告并按**当前工作区**
+# 发布 —— 内容已经在本地工作区里了，发布它才是使用者的本意。
+if git fetch --prune origin 2>/dev/null; then
+  # 只快进，不 reset：本地分支落后就前进，分叉或领先就报错让人看
+  git checkout -q "$BRANCH" 2>/dev/null || git checkout -q -b "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
+  if git merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
+    echo "  git: 已对齐到 origin/$BRANCH（$(git rev-parse --short HEAD)）"
+  else
+    echo "  警告：本地 $BRANCH 无法快进到 origin/$BRANCH（有本地提交或已分叉）。" >&2
+    echo "        按当前工作区继续发布（git log --oneline --graph --all 可看原因）。" >&2
+  fi
+else
+  echo "  警告：取不到 origin/$BRANCH（网络或凭据问题）。" >&2
+  echo "        按当前工作区继续发布（即 $REPO_DIR 里现有的内容）。" >&2
 fi
 
 # mkdir -p 而不是 install -d：站点目录属主是 www，发布用户 blog 无权 chmod 它，
@@ -122,5 +135,32 @@ rsync -rlt --omit-dir-times --delete \
 # 图片上传目录留出来（本地还没传过图时它不存在）
 mkdir -p "$WEB_ROOT/img/uploads"
 
+# ------------------------------------------------------------
+# 发布后自检：不该出现在站点根目录的东西，一个都不许有
+# ------------------------------------------------------------
+# 为什么要有这一步：rsync 的排除清单是**黑名单**，它保证"这些不被上传"，
+# 但保证不了"站点根目录里没有它们的旧副本"，也挡不住有人手工拷进去、
+# 或者改了名字的版本（admin-old/、server.bak/）。
+# 这个项目就发生过管理页与 dev-server.mjs 被公网直接下载的事故。
+# 所以发布完**主动验一遍**，不通过就大声报错（exit 5），别等下次才发现。
+leaked=0
+for bad in admin _admin server tests api .env .git .admin; do
+  if [ -e "$WEB_ROOT/$bad" ]; then
+    echo "  泄漏！站点根目录里存在 /$bad" >&2
+    leaked=1
+  fi
+done
+# 顶层散落的 .mjs / .cjs 源码也不该存在
+if find "$WEB_ROOT" -maxdepth 1 -name '*.mjs' -o -maxdepth 1 -name '*.cjs' 2>/dev/null | grep -q .; then
+  echo "  泄漏！站点根目录里有 .mjs / .cjs 源码" >&2
+  leaked=1
+fi
+if [ "$leaked" = "1" ]; then
+  echo "" >&2
+  echo "发布已中断，但内容可能已经同步过去。请立刻人工清理 $WEB_ROOT 并核对 nginx 规则。" >&2
+  exit 5
+fi
+
 echo "published $(git -C "$REPO_DIR" rev-parse --short HEAD) ($(git -C "$REPO_DIR" log -1 --pretty=%s))"
 echo "  -> $WEB_ROOT  at $(date -Is)"
+echo "  自检通过：站点根目录无 admin/ server/ tests/ api/ .env 等非公开产物"

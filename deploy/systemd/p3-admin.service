@@ -46,15 +46,41 @@ Restart=on-failure
 RestartSec=3
 
 # ---- 沙箱 ----
+# 注意 ProtectSystem 的两个取值差别（这里很重要，容易写错）：
+#   full   → 只有 /usr /boot /etc 变只读，**其余文件系统照旧可写**
+#   strict → 整个文件系统只读，只有 ReadWritePaths 里列出的路径可写
+# 用 full 的话 ReadWritePaths 既不收紧也不放开，服务实际能写 blog 用户能写的
+# 一切（包括 /www/wwwroot 下别人的站点）。所以这里用 strict，并把可写面收到
+# 只剩本仓库 —— auto-publish 那步 rsync 进站点根目录是**另一个进程**
+# （blog-publish 由本服务 fork 出来），同样受这份沙箱约束，所以站点根目录
+# 也必须在 ReadWritePaths 里。
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectSystem=full
+PrivateDevices=yes
+ProtectSystem=strict
 ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 # 仓库要能写（posts.js / 备份 / 回收站）
 ReadWritePaths=/srv/blog/repo
-# 站点根目录要能写：--auto-publish 会以 blog 身份跑 blog-publish，
+# 站点根目录要能写：--auto-publish 会 fork blog-publish，
 # 而它要 rsync 进 /www/wwwroot/<站点>。blog 在 www 组里、目录是 2775。
 ReadWritePaths=/www/wwwroot/43.108.100.116
+# 反代密钥只读即可；显式声明让它在这种收紧的沙箱下仍然可读
+ReadOnlyPaths=/etc/p3blog
 
 StandardOutput=journal
 StandardError=journal

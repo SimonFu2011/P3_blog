@@ -123,11 +123,30 @@ const rawReq = (base, path, opts) => new Promise((ok, fail) => {
   r.end();
 });
 
-const jsonReq = (base, path, method, body, headers) => req(base, path, {
-  method,
-  headers: Object.assign({ 'content-type': 'application/json' }, headers || {}),
-  body: JSON.stringify(body || {})
-});
+/**
+ * 写请求助手。
+ *
+ * 【为什么这里要自动补 version】接口现在**要求**写操作必须带版本号 ——
+ * 原来"没带就跳过检查"等于只要省略这个字段就能绕过并发保护（两个标签页
+ * 互相静默覆盖）。所以大多数用例只想表达"我要写这篇文章"，版本号是噪音；
+ * 这里自动取当前值补上。想显式测"过期版本号"或"完全没带版本号"的用例，
+ * 自己传 version（或传 version: null）即可，本函数不会覆盖已给出的值。
+ */
+const jsonReq = async (base, path, method, body, headers) => {
+  let payload = body || {};
+  const isWrite = method && method !== 'GET' && method !== 'HEAD';
+  if (isWrite && path.startsWith('/api/posts')
+      && !Object.prototype.hasOwnProperty.call(payload, 'version')) {
+    const cur = await req(base, '/api/session');
+    const v = cur.json && cur.json.store && cur.json.store.version;
+    if (v) payload = Object.assign({}, payload, { version: v });
+  }
+  return req(base, path, {
+    method,
+    headers: Object.assign({ 'content-type': 'application/json' }, headers || {}),
+    body: JSON.stringify(payload)
+  });
+};
 
 /* 每篇新文章都长这样，字段齐全 */
 const draft = (slug, over) => Object.assign({

@@ -278,21 +278,35 @@ export const createApp = async (options) => {
     if (!check.ok) {
       throw new HttpError(500, '写回结果未通过复核，已放弃保存：' + check.reason);
     }
+    /* 【备份失败就不要写】backupFile 在磁盘满 / 权限错时会返回 null。
+       原来这里只把日志尾巴写成"(备份失败)"然后照写不误 —— 那等于在没有
+       任何副本的情况下原地覆盖，与 backup.mjs 开头"写之前一定先备份一份"
+       的承诺相反。内容安全优先于可用性：宁可这次保存失败。 */
     const backupPath = await backup.backupFile(cfg.runtimeDir, cfg.postsFile, 'posts');
+    if (!backupPath) {
+      throw new HttpError(500, '备份失败，已放弃保存（避免没有副本的原地覆盖）。请检查磁盘空间与 .admin/backups 的权限');
+    }
     await writeFileAtomic(cfg.postsFile, nextSource);
     await backup.rotateBackups(cfg.runtimeDir, 'posts');
     const after = await readPosts();
-    log(note || 'posts.js 已更新',
-      backupPath ? '(备份 ' + backupPath.replace(cfg.repoDir + sep, '') + ')' : '(备份失败)');
+    log(note || 'posts.js 已更新', '(备份 ' + backupPath.replace(cfg.repoDir + sep, '') + ')');
     /* 保存即发布：让公开站点立刻看到这篇改动，不用再手工跑 blog-publish。
        失败不抛出 —— 见 publishToWebRoot 里的说明。 */
     if (cfg.autoPublish) await publishToWebRoot();
-    return { version: after.hash, backup: backupPath ? backupPath.replace(cfg.repoDir + sep, '') : null };
+    return { version: after.hash, backup: backupPath.replace(cfg.repoDir + sep, '') };
   };
 
-  /** 乐观锁：版本号不一致就拒绝，绝不静默覆盖别处的改动 */
+  /**
+   * 乐观锁：版本号不一致就拒绝，绝不静默覆盖别处的改动。
+   *
+   * 【必须要有版本号】原来这里是"没带 version 就跳过检查"，于是只要**省略**
+   * 这个字段，409 那条路永远不会走 —— 两个标签页同时编辑就变成一个静默
+   * 覆盖另一个，"绝不静默覆盖"这句注释是假的。现在缺版本号直接 422。
+   */
   const assertFresh = (body) => {
-    if (!body || typeof body.version !== 'string' || !body.version) return;
+    if (!body || typeof body.version !== 'string' || !body.version) {
+      throw new HttpError(422, '缺少 version（请先 GET /api/session 取当前版本号再提交，否则无法判断是否覆盖了别处的改动）');
+    }
     if (rootHash && body.version !== rootHash) {
       throw new HttpError(409, 'posts.js 在别处被改动过（可能是手动编辑或另一个标签页），已拒绝覆盖。请刷新后重试');
     }
@@ -574,6 +588,15 @@ export const createApp = async (options) => {
     res.on('close', done);
   });
 
+  /* 这个服务器只应该发"公开产物"。blogDir 里同时住着源码（server/）、
+     管理页 UI（admin/）、测试、文档（*.md）—— 它们是**代码**，不是站点内容。
+     发布脚本本来就排除它们，nginx 也挡了一层；但这里是同一个进程在服务，
+     没有理由把它自己的源码发出去（一条配错的 nginx location / 就等于全泄）。
+     所以按扩展名白名单 + 目录黑名单两道收口。 */
+  const STATIC_EXT_ALLOW = new Set(['.html', '.css', '.js', '.json', '.svg', '.png', '.jpg',
+    '.jpeg', '.gif', '.webp', '.ico', '.avif', '.mp3', '.wav', '.txt', '.woff', '.woff2']);
+  const STATIC_DIR_DENY = new Set(['server', 'admin', 'tests', 'deploy', 'node_modules']);
+
   const serveStatic = async (res, urlPath) => {
     let rel = urlPath;
     try { rel = decodeURIComponent(urlPath); } catch { sendText(res, 400, 'bad path'); return; }
@@ -585,9 +608,15 @@ export const createApp = async (options) => {
     try { file = safeJoin(cfg.blogDir, rel.replace(/^[/\\]+/, '')); }
     catch { sendText(res, 403, 'forbidden'); return; }
 
-    /* 隐藏目录（.git / .admin / .preview）不通过这个服务器暴露 */
     const relToRoot = file.slice(cfg.blogDir.length).split(sep).filter(Boolean);
+    /* 隐藏目录（.git / .admin / .preview）不通过这个服务器暴露 */
     if (relToRoot.some((seg) => seg.startsWith('.'))) { sendText(res, 404, 'not found'); return; }
+    /* 源码目录不发 */
+    if (relToRoot.some((seg) => STATIC_DIR_DENY.has(seg.toLowerCase()))) { sendText(res, 404, 'not found'); return; }
+    /* 非产物扩展名不发：.mjs/.cjs/.md/.env/.bak… 一律 404 */
+    const dot = file.lastIndexOf('.');
+    const ext = dot >= 0 ? file.slice(dot).toLowerCase() : '';
+    if (!STATIC_EXT_ALLOW.has(ext)) { sendText(res, 404, 'not found'); return; }
 
     let st;
     try { st = await stat(file); }
@@ -732,6 +761,39 @@ const isMain = (() => {
   } catch { return false; }
 })();
 
+/* ------------------------------------------------------------
+   启动横幅：做成纯函数，这样能被测试直接调用
+   ------------------------------------------------------------
+   为什么单独抽出来：这一整段原来写在 server.listen 的回调里，于是
+   "测试全绿但服务一起来就崩"是可能的 —— 有一次就是把 createApp 内部
+   的局部变量引用在这里，ReferenceError 只在真实启动时才炸。
+   抽成纯函数之后，"启动路径"这四个字就有了可执行的判据。
+   ------------------------------------------------------------ */
+export const bannerLines = (cfg, needPass) => {
+  const secureNow = (cfg.publicOrigins || []).some((o) => String(o).toLowerCase().startsWith('https://'));
+  const lines = [
+    '',
+    '  站点      http://' + cfg.host + ':' + cfg.port + '/',
+    '  管理页    http://' + cfg.host + ':' + cfg.port + '/_admin/',
+    '  认证      ' + (needPass ? '已设置口令（打开管理页后需要输入）' : '仅本机 + 会话令牌（未设口令）'),
+    '  模式      ' + (cfg.remote
+      ? ('远端（每客户端会话，空闲超时 ' + Math.round(cfg.sessionIdleMs / 60000) + ' 分钟'
+         + (secureNow ? '，cookie 带 Secure' : '，cookie 无 Secure（纯 HTTP）')
+         + (cfg.proxySecret ? '，已启用反代密钥' : '，未启用反代密钥')
+         + (cfg.autoPublish ? '，保存后自动发布' : '') + '）')
+      : '本地（只绑回环，行为与从前一致）')
+  ];
+  if (cfg.remote) {
+    lines.push('  白名单    Host: ' + (cfg.publicHosts || []).join(' ')
+      + '   Origin: ' + (cfg.publicOrigins || []).join(' '));
+  }
+  lines.push('  数据      ' + cfg.postsRel);
+  lines.push('  运行时    ' + cfg.runtimeDir + '  （备份 / 回收站 / 会话）');
+  lines.push('  停止      Ctrl+C');
+  lines.push('');
+  return lines;
+};
+
 const main = async () => {
   const argv = process.argv.slice(2);
   const flag = (n) => argv.includes('--' + n);
@@ -833,9 +895,15 @@ const main = async () => {
     process.exit(4);
   }
   if (cfg.remote && !cfg.proxySecret) {
-    console.warn('警告：远端模式未配置 --proxy-secret-file。');
-    console.warn('      反代之后"对端必须是回环"恒真，本机任何进程都能直连本端口拿到写权限。');
-    console.warn('      强烈建议按 deploy/PLAN-ADMIN-LIVE.md 第 6.4 节配置共享密钥。');
+    /* 【失败要"关"不要"开"】反代之后"对端必须是回环"恒真，所以共享密钥是
+       "把本机可达收窄成只有我们的 nginx 可达"的**唯一**手段。原来这里只打
+       一句警告就继续启动 —— 忘了加参数 = 静默丢掉这道控制，与本项目其它
+       地方"宁可不启动也不带着已知漏洞跑"的取向不一致。 */
+    console.error('远端模式必须配置 --proxy-secret-file。');
+    console.error('  反代之后对端恒为回环，本机任何进程都能直连本端口拿到写权限；');
+    console.error('  没有密钥这道控制就等于没设。生成方式见 deploy/PLAN-ADMIN-LIVE.md 第 6.4 节：');
+    console.error('    openssl rand -hex 32 > /etc/p3blog/proxy-secret');
+    process.exit(4);
   }
 
   const app = await createApp(cfg);
@@ -850,26 +918,10 @@ const main = async () => {
   }
 
   app.server.listen(cfg.port, cfg.host, () => {
-    console.log('');
-    console.log('  站点      http://' + cfg.host + ':' + cfg.port + '/');
-    console.log('  管理页    http://' + cfg.host + ':' + cfg.port + '/_admin/');
-    console.log('  认证      ' + (needPass ? '已设置口令（打开管理页后需要输入）' : '仅本机 + 会话令牌（未设口令）'));
-    console.log('  模式      ' + (cfg.remote
-      ? ('远端（每客户端会话，空闲超时 ' + Math.round(cfg.sessionIdleMs / 60000) + ' 分钟'
-         + (cookieSecure ? '，cookie 带 Secure' : '，cookie 无 Secure（纯 HTTP）')
-         + (cfg.proxySecret ? '，已启用反代密钥' : '，未启用反代密钥')
-         + (cfg.autoPublish ? '，保存后自动发布' : '') + '）')
-      : '本地（只绑回环，行为与从前一致）'));
-    if (cfg.remote) {
-      console.log('  白名单    Host: ' + cfg.publicHosts.join(' ') + '   Origin: ' + cfg.publicOrigins.join(' '));
-    }
-    console.log('  数据      ' + cfg.postsRel);
-    console.log('  运行时    ' + cfg.runtimeDir + '  （备份 / 回收站 / 会话）');
-    console.log('  停止      Ctrl+C');
-    console.log('');
+    bannerLines(cfg, needPass).forEach((l) => console.log(l));
     if (!needPass) {
       console.log('  提示：想再加一道本机口令锁：');
-      console.log('        node blog-enter/server/dev-server.mjs --set-pass --pass "你的口令"');
+      console.log('        printf %s "你的口令" | node blog-enter/server/dev-server.mjs --set-pass --pass-stdin');
       console.log('');
     }
   });

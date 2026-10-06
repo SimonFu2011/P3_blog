@@ -22,7 +22,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createHarness } from './harness.mjs';
-import { createApp } from '../dev-server.mjs';
+import { createApp, bannerLines } from '../dev-server.mjs';
 import { setPassphrase, resetThrottle } from '../lib/auth.mjs';
 
 const H = createHarness('remote-mode.test.mjs');
@@ -411,7 +411,47 @@ test('远端：客户端 IP 取 X-Forwarded-For 最后一段，且用于退避�
 
 /* ============================================================
    7. 本地模式行为完全不变
+   ============================================================ *//* ============================================================
+   8. 启动横幅（"启动路径"的可执行判据）
+   ------------------------------------------------------------
+   这段曾经写在 server.listen 的回调里、引用了 createApp 内部的局部变量，
+   于是"测试全绿但服务一起来就崩"。抽成纯函数之后在这里钉住。
    ============================================================ */
+const bannerCfg = {
+  host: '127.0.0.1', port: 8848, remote: true, sessionIdleMs: 120 * 60 * 1000,
+  proxySecret: 'x', autoPublish: true, publicHosts: ['example.test'],
+  publicOrigins: ['http://example.test'], postsRel: 'blog-enter/js/posts.js',
+  runtimeDir: '/srv/blog/repo/.admin'
+};
+
+test('启动横幅：远端模式不抛异常，且如实报告 HTTP 下 cookie 无 Secure', () => {
+  const lines = bannerLines(bannerCfg, true);
+  const text = lines.join('\n');
+  assert.ok(text.includes('远端'), '应标明远端模式');
+  assert.ok(text.includes('cookie 无 Secure'), '纯 HTTP 下必须如实提示');
+  assert.ok(text.includes('已启用反代密钥'));
+  assert.ok(text.includes('保存后自动发布'));
+  assert.ok(text.includes('Host: example.test'));
+});
+
+test('启动横幅：给出 https origin 时如实报告 cookie 带 Secure', () => {
+  const text = bannerLines(Object.assign({}, bannerCfg, {
+    publicOrigins: ['https://simonfu.xin']
+  }), true).join('\n');
+  assert.ok(text.includes('cookie 带 Secure'), 'https 下必须提示 Secure 已启用');
+  assert.ok(!text.includes('cookie 无 Secure'));
+});
+
+test('启动横幅：本地模式报告"只绑回环"', () => {
+  const text = bannerLines({
+    host: '127.0.0.1', port: 8848, remote: false, sessionIdleMs: 0,
+    publicHosts: [], publicOrigins: [], postsRel: 'blog-enter/js/posts.js',
+    runtimeDir: '/tmp/.admin'
+  }, false).join('\n');
+  assert.ok(text.includes('本地（只绑回环'));
+  assert.ok(text.includes('未设口令'));
+});
+
 test('本地模式：未设口令时未认证的 GET /api/posts 仍为 200（行为不变）', async () => {
   const sb = await makeSandbox();
   try {
