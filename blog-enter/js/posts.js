@@ -13,7 +13,9 @@
    不做 Date 解析 —— 避免时区把跨月的那几条推错月份。
    body 是 HTML 片段，由 article.html 交给 js/article.js 注入。
    ============================================================ */
-window.POSTS = [  {
+window.POSTS = [
+
+  {
   slug: 'post-20261006',
   title: '无题',
   date: '2026-10-06',
