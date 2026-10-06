@@ -71,14 +71,19 @@ cd "$REPO_DIR"
 #
 # 所以发布前先把站点根目录里"仓库没有"的图片反向同步回仓库，
 # 让它们成为受版本控制的内容。仓库才是真源，站点根目录只是产物。
+#
+# ⚠️ 顺序很重要：这一步必须在**下面那道"工作区脏就拒绝发布"的闸门之前**，
+#    而且捞回的文件要交给"内容自动提交"一起提交。否则捞回动作本身会把工作区
+#    弄脏 → 闸门拒绝发布 → 图片虽然进了仓库，但**什么都没发布出去**
+#    （这个反噬真的发生过：捞回成功、随后静默退出、线上毫无变化）。
 if [ -d "$WEB_ROOT/img/uploads" ]; then
   mkdir -p "$SITE_DIR/img/uploads"
-  # -i(--ignore-existing) + -t(--times)：只补仓库里缺的，不覆盖已有的
-  if rsync -rti --ignore-existing --itemize-changes \
-       "$WEB_ROOT/img/uploads/" "$SITE_DIR/img/uploads/" 2>/dev/null | grep -q '^>'; then
+  # -i(--ignore-existing)：只补仓库里缺的，不覆盖已有的
+  pulled="$(rsync -rti --ignore-existing --itemize-changes \
+      "$WEB_ROOT/img/uploads/" "$SITE_DIR/img/uploads/" 2>/dev/null | grep '^>' || true)"
+  if [ -n "$pulled" ]; then
     echo "  从站点根目录捞回仓库缺失的上传图片："
-    rsync -rti --ignore-existing --itemize-changes \
-      "$WEB_ROOT/img/uploads/" "$SITE_DIR/img/uploads/" 2>/dev/null | grep '^>' | sed 's/^/    /'
+    echo "$pulled" | sed 's/^/    /'
   fi
 fi
 
@@ -114,6 +119,27 @@ if [ "${AUTO_COMMIT_CONTENT:-1}" = "1" ]; then
     git -c user.name="blog-publish" -c user.email="blog-publish@localhost" \
         commit -q -m "content: 管理页保存于 $(date -Is)" || echo "  （提交失败，继续尝试发布）"
     echo "  -> $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
+  fi
+
+  # ----------------------------------------------------------
+  # 把内容提交推回 GitHub
+  # ----------------------------------------------------------
+  # 为什么必须有这一步：内容提交如果只留在服务器上，就等于**没有异地备份**。
+  # 真实事故：本地提交被一次 git reset 抹掉，文章随之消失（只能从备份文件里捞）。
+  #
+  # 失败**不阻塞发布** —— 内容已经安全落盘在仓库与备份里，推送只是异地副本。
+  # 需要服务器有写权限的 Deploy Key（见 DEPLOY-RECORD 第 9 节）。
+  if [ "${PUSH_CONTENT:-1}" = "1" ]; then
+    if git rev-parse --verify -q "origin/$BRANCH" >/dev/null 2>&1 \
+       && [ "$(git rev-list --count "origin/$BRANCH..HEAD" 2>/dev/null || echo 0)" -gt 0 ]; then
+      if git push -q origin "$BRANCH" 2>/dev/null; then
+        echo "  已推送到 origin/$BRANCH（内容有了异地备份）"
+        git fetch --prune origin >/dev/null 2>&1 || true
+      else
+        echo "  提示：推送到 origin/$BRANCH 失败（内容已保存在服务器仓库里）。" >&2
+        echo "        检查 Deploy Key 的写权限，或稍后手工 git push。" >&2
+      fi
+    fi
   fi
 fi
 
