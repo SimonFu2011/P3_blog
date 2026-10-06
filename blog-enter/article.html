@@ -213,6 +213,10 @@
           requiredMeta: ['nick', 'mail'],
           imageUploader: false,   /* 关掉上传入口；服务端没有对应开关 */
           search: false,          /* 表情搜索会去请求 giphy，关掉更干净 */
+          emoji: false,           /* ← 默认表情包是 unpkg 上的 @waline/emojis：
+                                     真浏览器实测会去拉 unpkg.com（国内不稳，
+                                     而且破了本站"零外部运行时依赖"这条）。
+                                     想开就得把表情包也自托管，见 comments/README.md。 */
           reaction: false         /* 文章反应条：本站极简皮肤不需要，也就少一次请求 */
         });
       } catch (err) {

@@ -26,6 +26,17 @@ curl.exe -sSL -o blog-enter/comments/waline-admin.js https://unpkg.com/@waline/a
 
 改完把上表的版本号一起改掉，然后照常发布（`blog-publish`）。
 
+## 表情包：现在是关掉的（有原因）
+
+Waline 客户端的表情选项卡默认会去 `https://unpkg.com/@waline/emojis@1.1.0/...` 拉数据。
+这不是猜的：`verify-comments-live.mjs` 在真浏览器里跑的时候，网络面板里就有这条外部请求。
+本站的定位是"零外部运行时依赖"，所以 `article.html` 里写的是 `emoji: false`。
+
+要开就得连表情包一起自托管：把 `@waline/emojis` 里那一套（`<set>/info.json`
+加上每个表情一个 png）下载到 `blog-enter/comments/emojis/`，再把 `emoji: false` 换成
+指向该目录的路径（写法见 <https://waline.js.org/guide/features/emoji.html>）。
+代价是仓库里多出上百个二进制小文件 —— 值不值，你自己权衡。
+
 ## 两条纪律
 
 1. **`waline-admin.js` 的路径写在服务器环境变量里**（`WALINE_ADMIN_MODULE_ASSET_URL`，
