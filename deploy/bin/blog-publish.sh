@@ -232,6 +232,14 @@ mkdir -p "$WEB_ROOT"
 #    ADMIN.md 永远删不掉，它所在的目录也就永远删不掉 —— 实测报
 #    "cannot delete non-empty directory: blog-enter"，而那个目录里正好
 #    残留着一份管理端文档、可被公网直接读取。-s 让排除规则只作用于发送端。
+# 3) **Node 依赖清单放 server/ 下，不要放 blog-enter/ 顶层**。
+#    --filter='-s /server/' 排除的是整个 blog-enter/server/ 子树，它下面的
+#    package.json / package-lock.json / node_modules/ 一个都不会被同步到站点根 ——
+#    这是"结构上就安全"，不靠逐文件排除（逐文件排除漏一个，就会像 ADMIN.md
+#    那样静默泄漏到公网）。
+#    ⚠️ 所以**不要**为顶层依赖清单再加 rsync 排除规则：普通 exclude 在接收端
+#    同时起"保护"作用，会让它变成 --delete 也删不掉的残留（第 2 点那个坑），
+#    线上反而永远留着一份。顶层残留交给下面的自检报泄漏（exit 5）+ --delete 清掉。
 # ------------------------------------------------------------
 rsync -rlt --omit-dir-times --delete \
   --filter='-s /server/' \
@@ -273,8 +281,15 @@ chmod 644 "$WEB_ROOT/.user.ini" 2>/dev/null || true
 # 检查两件事，缺一不可：
 #   A) 不该有的：admin/ server/ tests/ api/ .env 等源码与隐藏文件
 #   B) 该有的**能读**：nginx 以 www 身份运行，凡是它读不了的就是线上 404/403
+#
+# ⚠️ 这张清单必须跟着 rsync 的排除规则一起长。历史上 ADMIN.md 就是这么漏的：
+#    排除规则加了、自检清单没加 → 文件发到公网很久都没人发现。
+#    所以这里把 **Node 依赖清单**也列上：它们属于后端构建物，按约定放在
+#    blog-enter/server/ 下（server/ 被整体排除），一旦出现在站点根目录就是
+#    "多发了一份"，会暴露依赖树、运行时版本甚至私有包名。
 leaked=0
-for bad in admin _admin server tests api .env .git .admin; do
+for bad in admin _admin server tests api .env .git .admin \
+           package.json package-lock.json npm-debug.log yarn.lock pnpm-lock.yaml; do
   if [ -e "$WEB_ROOT/$bad" ]; then
     echo "  泄漏！站点根目录里存在 /$bad" >&2
     leaked=1

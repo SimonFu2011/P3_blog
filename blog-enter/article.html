@@ -11,10 +11,25 @@
      顺序不能换：同权重靠后加载取胜。 -->
 <link rel="stylesheet" href="css/geo.css">
 <link rel="stylesheet" href="css/prose-light.css">
+<!-- 本轮新增：右上角登录入口 + 自建评论组件。必须排在最后 ——
+     它要覆盖 pages.css / prose-light.css 里旧评论区那套深色卡片样式。 -->
+<link rel="stylesheet" href="css/comments.css">
 </head>
 <body>
 
 <a class="skip" href="#main">跳到正文</a>
+
+<!-- ============================================================
+     右上角用户入口
+     ------------------------------------------------------------
+     标记写在 HTML 里（脚本挂了也看得见），由 js/auth-ui.js 接管：
+     未登录显示「登录」，有会话时换成用户名 + 下拉（我的评论 / 退出登录）。
+     位置与样式见 css/comments.css §1。
+     ============================================================ -->
+<div class="auth-entry" id="authEntry" data-auth-entry>
+  <button class="auth-btn" type="button" data-auth-open
+          aria-haspopup="dialog" aria-expanded="false">登录</button>
+</div>
 
 <nav class="nav" id="nav" aria-label="站点导航">
   <div class="nav-bar">
@@ -86,30 +101,28 @@
     </article>
 
     <!-- ------------------------------------------------------------
-         评论区（Waline，自建在服务器的 /comments/ 下）
+         评论区（自建组件，MySQL 存储）
          ------------------------------------------------------------
          · 默认 hidden：只有 js/article.js 确认"这篇文章真的存在"之后才放开。
            评论区是 #articleShell 之外的兄弟节点，不这样的话，访问一个不
            存在的 slug 会在"这篇文章不存在"下面多出一个空评论区，
            而且会真的去拉评论、甚至能发评论。
-         · 客户端资源**自托管**（comments-assets/waline.js、comments-assets/waline.css），
-           不走 unpkg：那玩意儿国内不稳定，挂了就是评论区一片空白，而且是
-           运行时才失败 —— 本地测不出来。资源放在 comments-assets/ 而不是
-           comments/，是因为 nginx 把整段 /comments/ 都反代给 Waline 了
-           （接口 /comments/api/、后台 /comments/ui/、验证链接 /comments/verification
-           都是 Waline 的路由），静态资源混在里面会被一起转走然后 404。
-         · 初始化只有一个入口 window.initComments(slug)：由下面的模块脚本
-           准备，由 article.js 调用。文章到底存不存在，只由 article.js 判定。
+         · 客户端是本站自己写的（js/comments.js + css/comments.css），零依赖、
+           零外部请求：接口走 /api/comments，会话走 /api/auth/*（同源 Cookie）。
+         · 初始化只有一个入口 window.initComments(slug)：由 comments.js 提供，
+           由 article.js 调用。文章到底存不存在，只由 article.js 判定。
+           返回顶部那枚「登录」按钮（右上角）由 js/auth-ui.js 接管，两个文件
+           共用同一个模态框：未登录点「发表 / 回复」就地弹它，不跳转。
          ------------------------------------------------------------ -->
     <section class="comments" id="comments" hidden aria-labelledby="commentsTitle">
       <div class="comments-head">
         <h2 class="section-title" id="commentsTitle">COMMENTS<span class="st-cn">评论</span></h2>
-        <span class="section-note" id="commentsNote">Waline · 先审后发</span>
+        <span class="section-note" id="commentsNote">自建评论 · 登录后可发表</span>
       </div>
       <div class="comments-box" id="commentsBox">
-        <!-- 评论服务挂载点：内容由 comments/waline.js 注入 -->
-        <div id="commentsMount" data-comments-slot="waline"></div>
-        <!-- 资源还没到位时的占位；Waline 初始化后会被撤掉 -->
+        <!-- 评论组件挂载点：列表 / 发表框 / 回复表单都注入到这里 -->
+        <div id="commentsMount"></div>
+        <!-- 资源还没到位时的占位；组件接管后撤掉 -->
         <p class="comments-note" id="commentsLoading">评论区加载中……</p>
       </div>
     </section>
@@ -139,102 +152,12 @@
 
 <script src="js/data.js" defer></script>
 <script src="js/posts.js" defer></script>
+<!-- 登录入口与评论组件：auth-ui.js 必须在 comments.js 之前（后者复用它的
+     窗口对象 SiteAuth 与同一个模态框），两者都必须在 article.js 之前 ——
+     article.js 渲染成功后要马上调 window.initComments(slug)。 -->
+<script src="js/auth-ui.js" defer></script>
+<script src="js/comments.js" defer></script>
 <script src="js/article.js" defer></script>
 <script src="js/pages.js" defer></script>
-
-<!-- ============================================================
-     评论区（Waline）客户端引导
-     ------------------------------------------------------------
-     只做两件事：
-       1) 把自托管的客户端资源备好（离线/失败时给人话说明，不甩红色报错）
-       2) 暴露 window.initComments(slug)
-     **不判断文章是否存在** —— 那是 js/article.js 的活。它已经处理过
-     aliases 旧地址跳转等一堆情况，这里再判一次，两处迟早会不一致。
-
-     时序：module 脚本天生 defer，article.js 也是 defer；谁先执行不确定，
-     而且 import() 还要一次网络往返。所以两边都兜：
-       · article.js 渲染成功时调 window.initComments（快路径）
-       · 本脚本加载完若发现 window.Article 已在，就补一次（慢路径）
-     两条路径靠 mounted 保证 init() 只会被调用一次。
-     ============================================================ -->
-<script type="module">
-  const mount = document.getElementById('commentsMount');
-  const loading = document.getElementById('commentsLoading');
-  const box = document.getElementById('commentsBox');
-
-  /* 出问题时的统一落点：一句人话，正文照常看 */
-  const say = (text) => {
-    if (loading) loading.hidden = true;
-    if (!mount) return;
-    mount.textContent = '';
-    const p = document.createElement('p');
-    p.className = 'cb-title';
-    p.textContent = text;
-    mount.appendChild(p);
-  };
-
-  if (!mount) {
-    console.error('[comments] 页面里找不到 #commentsMount');
-  } else if (!/^https?:$/.test(location.protocol)) {
-    /* file:// 下 serverURL 必然跨域，Waline 的请求一定失败。
-       这里直接给一句说明，**不初始化、不发任何请求**（双击打开也能看正文）。 */
-    say('当前是直接打开本地文件，评论区需要联网才能加载。');
-  } else {
-    let started = false;
-
-    /* 唯一的初始化入口。**只有文章确实存在时才会被调用**，所以访问一个不存在的
-       slug 时，这里一个字节都不会下载 —— 更不会去请求评论接口。 */
-    window.initComments = async (slug) => {
-      if (started) return;
-      started = true;
-      try {
-        const css = document.createElement('link');
-        css.rel = 'stylesheet';
-        css.href = 'comments-assets/waline.css';
-        document.head.appendChild(css);
-
-        const { init } = await import('./comments-assets/waline.js');
-
-        if (loading) loading.hidden = true;
-        if (box) box.classList.add('is-live');   /* 收掉占位卡片的外壳 */
-
-        /* serverURL 从当前地址派生，不写死 IP：以后换域名、或站点挪到子目录，
-           这里都不用改。 */
-        const serverURL = new URL('comments/', location.href).href.replace(/\/$/, '');
-
-        init({
-          el: '#commentsMount',
-          serverURL: serverURL,
-          /* path 必须与公开地址严格一致：Waline 靠它把评论绑到文章上。
-             不要用 location.href 派生 —— file:// 与 http:// 会得到不同的值，
-             评论就会"换个地址打开就没了"。 */
-          path: '/article.html?slug=' + slug,
-          lang: 'zh-CN',
-          /* login 必须与服务端环境变量 LOGIN 一致：
-             服务端 force 而这里 disable → 提交时才报错；反过来 → 白让登录。 */
-          login: 'disable',
-          requiredMeta: ['nick', 'mail'],
-          /* 服务端 COMMENT_AUDIT=true（先审后发）时，作者自己看得到自己的评论并带
-             "审核中"提示，别人看不到。这里在输入框里先说一句，省得评论者以为发丢了。 */
-          locale: { placeholder: '想说点什么？（新评论需审核后公开）' },
-          imageUploader: false,   /* 关掉上传入口；服务端没有对应开关 */
-          search: false,          /* 表情搜索会去请求 giphy，关掉更干净 */
-          emoji: false,           /* ← 默认表情包是 unpkg 上的 @waline/emojis：
-                                     真浏览器实测会去拉 unpkg.com（国内不稳，
-                                     而且破了本站"零外部运行时依赖"这条）。
-                                     想开就得把表情包也自托管，见 comments/README.md。 */
-          reaction: false         /* 文章反应条：本站极简皮肤不需要，也就少一次请求 */
-        });
-      } catch (err) {
-        if (box) box.classList.remove('is-live');
-        console.error('[comments] 客户端资源加载失败', err);
-        say('评论区加载失败（客户端资源没能加载）。正文不受影响，刷新可以再试。');
-      }
-    };
-
-    /* 慢路径：本脚本跑到这里时 article.js 可能早就渲染完了 */
-    if (window.Article && window.Article.slug) window.initComments(window.Article.slug);
-  }
-</script>
 </body>
 </html>

@@ -9,10 +9,23 @@
      没有这一行时，下面的 css/js/导航都按 /foo/ 解析而 404，页面会变成裸 HTML。 -->
 <base href="/">
 <link rel="stylesheet" href="css/pages.css">
+<!-- 右上角登录入口（本轮新增）。这一页仍是深色皮肤（只加载 pages.css），
+     comments.css 里的颜色别名会自动落回 pages.css 的令牌，所以入口/模态框
+     在这一页是"白底卡片"，白底深字，在深色背景上依然可读。 -->
+<link rel="stylesheet" href="css/comments.css">
 </head>
 <body>
 
 <a class="skip" href="#main">跳到正文</a>
+
+<!-- ============================================================
+     右上角用户入口（标记写在 HTML 里，脚本挂了也看得见）
+     本页带 <base href="/">，相对路径的 js/css 会按站点根解析，不受影响。
+     ============================================================ -->
+<div class="auth-entry" id="authEntry" data-auth-entry>
+  <button class="auth-btn" type="button" data-auth-open
+          aria-haspopup="dialog" aria-expanded="false">登录</button>
+</div>
 
 <nav class="nav" id="nav" aria-label="站点导航">
   <div class="nav-bar">
@@ -75,6 +88,7 @@
 </div>
 
 <script src="js/data.js" defer></script>
+<script src="js/auth-ui.js" defer></script>
 <script src="js/pages.js" defer></script>
 <script>
 /* 把用户实际访问的路径填进提示里 —— 出错信息里带上"你访问的是什么"，

@@ -1,0 +1,601 @@
+/* ============================================================
+   登录入口 + 自建评论组件（一份文件，两块 UI）
+   ------------------------------------------------------------
+   为什么两块放一起：本轮新增的 CSS 只有这一个文件（见任务 inScope），
+   而"右上角登录入口 / 登录注册模态框"与"文章页评论列表"是同一套
+   小控件语言（发丝线 + 直角 + 红斜块重音），拆成两份反而要互相 import。
+
+   加载位置：
+     · index.html                 style.css → comments.css
+     · article/archive/about      pages.css → geo.css → prose-light.css → comments.css
+     · 404.html                   pages.css → comments.css（仍是深色皮肤）
+   一律排在最后：本文件要覆盖 pages.css / prose-light.css 里旧评论区
+   （.comments-box）的深色卡片与虚线边框。
+
+   两条纪律（与 prose-light.css 开头那份一致）：
+     1. 清除旧皮肤时要显式写 background:none / border:0 / box-shadow:none，
+        旧规则并没有消失，只是被后面的同权重规则覆盖；
+     2. 颜色只从下面这组 --cm-* 别名取，别名再去取站点既有变量 ——
+        不新增色值、不引入外部字体或图片。深浅两套皮肤（style.css 的
+        --ink/--white/--red…、geo.css 的 --g-*）都映射到同一组别名上，
+        所以 404 那种深底页面与白底内页共用一套规则。
+   ============================================================ */
+
+:root {
+  /* 皮肤别名：白底内页走 geo.css 的 --g-*，主界面/深色页走 style.css
+     与 pages.css 的 --*；最后一层是"两个都没定义"时的字面兜底。 */
+  --cm-surface: var(--g-bg, var(--white, #ffffff));
+  --cm-tint: var(--g-tint, var(--paper, #eef7fc));
+  --cm-ink: var(--g-ink, var(--ink, #071523));
+  --cm-ink-2: var(--g-teal-2, var(--teal-2, #14536b));
+  --cm-mute: var(--g-mute, var(--teal-2, #5b7284));
+  --cm-line: var(--g-rule, var(--line, rgba(11, 52, 70, .16)));
+  --cm-line-2: var(--g-rule-2, var(--line-2, rgba(11, 52, 70, .34)));
+  --cm-accent: var(--g-cyan-dk, var(--sky-deep, #0284c7));
+  --cm-accent-2: var(--g-teal, var(--teal, #0b3446));
+  --cm-soft: var(--g-cyan-soft, var(--sky, #38bdf8));
+  --cm-red: var(--g-red, var(--red, #ff1f3d));
+  --cm-red-dk: var(--g-red-dk, var(--red, #c8102e));
+  --cm-shadow: var(--g-shadow, 0 18px 44px -28px rgba(7, 21, 35, .34));
+  --cm-font: var(--font-jp);
+  --cm-font-en: var(--font-en);
+  --cm-font-num: var(--font-num);
+  --cm-code: var(--font-code, var(--font-num));
+}
+
+/* ============================================================
+   1. 右上角用户入口
+   ------------------------------------------------------------
+   位置：视口右上角（fixed）。坐标与站内其它角落元素同一档
+   （.credit / .cmdbar 用的是 clamp(18px, 3.2vw, 56px)）。
+
+   z-index 40 的来历：
+     · 主界面（index.html）：扇形菜单 15、时钟 30、入场遮罩 50。
+       取 40 = 压在菜单之上、藏在入场遮罩之下 —— 入场时它**不可能**
+       挡住 ENTER/滚轮，因为遮罩自己就盖着它。
+     · 内页：侧边栏 10、遮罩 9、Toast 60。取 40 在侧边栏之上、
+       提示条之下，不与移动端顶部抽屉的按钮抢位置（见 §1.3）。
+   ============================================================ */
+.auth-entry {
+  position: fixed;
+  top: clamp(16px, 3vh, 40px);
+  right: clamp(16px, 3.2vw, 56px);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  font-family: var(--cm-font);
+}
+
+/* 入场遮罩解除之前不出现。
+   条件挂在 body 的类名上（is-entry / is-falling / is-resetting 只有
+   index.html 会加），所以内页那一份永远可见。
+   visibility:hidden（而不只是 opacity:0）是为了连 Tab 顺序与读屏一起摘掉：
+   入场那一屏只接受 ENTER / 空格 / 滚轮。 */
+body.is-entry .auth-entry,
+body.is-falling .auth-entry,
+body.is-resetting .auth-entry {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+.auth-entry {
+  opacity: 1;
+  transition: opacity .5s ease;
+}
+
+.auth-wrap { position: relative; }
+
+.auth-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 15px;
+  border: 1px solid var(--cm-line-2);
+  border-radius: 0;
+  background: rgba(255, 255, 255, .92);
+  color: var(--cm-ink-2);
+  font-family: var(--cm-font-en);
+  font-weight: 900;
+  font-style: italic;
+  font-size: 12px;
+  letter-spacing: .2em;
+  line-height: 1.4;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  transition: border-color .18s ease, color .18s ease, background-color .18s ease;
+}
+/* 红色斜块：与 .nav-brand-tag::before、.code-lang::before 同一枚重音记号 */
+.auth-btn::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 15px;
+  height: 2px;
+  background: var(--cm-red);
+  transform: skewX(-16deg);
+}
+.auth-btn:hover { border-color: var(--cm-accent); color: var(--cm-ink); background: #fff; }
+.auth-btn[aria-expanded="true"] { border-color: var(--cm-red); color: var(--cm-ink); background: #fff; }
+
+/* 已登录：用户名 + 下拉箭头。max-width + 省略号是为了让窄屏的
+   顶部导航能算出一个固定的让位宽度（见 §1.3）。 */
+.auth-btn.is-user {
+  font-style: normal;
+  font-family: var(--cm-font);
+  font-weight: 700;
+  letter-spacing: .06em;
+  font-size: 13px;
+  max-width: 14ch;
+}
+.auth-user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auth-caret {
+  flex: 0 0 auto;
+  width: 0; height: 0;
+  margin-left: 2px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--cm-red);
+}
+
+.auth-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 1;
+  min-width: 168px;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--cm-line-2);
+  border-radius: 0;
+  background: var(--cm-surface);
+  box-shadow: var(--cm-shadow);
+}
+.auth-menu[hidden] { display: none; }
+.auth-item {
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--cm-ink-2);
+  font-family: var(--cm-font);
+  font-size: 13px;
+  letter-spacing: .08em;
+  text-align: left;
+  cursor: pointer;
+}
+.auth-item + .auth-item { border-top: var(--cm-hair, 1px) solid var(--cm-line); }
+.auth-item:hover { background: var(--cm-tint); color: var(--cm-ink); }
+.auth-item.is-quiet { color: var(--cm-mute); }
+
+/* ============================================================
+   2. 模态框（登录 / 注册 / 我的评论）
+   ============================================================ */
+.auth-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  font-family: var(--cm-font);
+}
+.auth-modal[hidden] { display: none; }
+
+.auth-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 21, 35, .55);
+  backdrop-filter: blur(2px);
+}
+
+.auth-panel {
+  position: relative;
+  z-index: 1;
+  width: min(430px, 100%);
+  max-height: min(86vh, 720px);
+  overflow-y: auto;
+  padding: 20px 22px 22px;
+  border: 1px solid var(--cm-line-2);
+  border-top: 3px solid var(--cm-red);
+  border-radius: 0;
+  background: var(--cm-surface);
+  color: var(--cm-ink);
+  box-shadow: var(--cm-shadow);
+}
+
+.auth-tabs {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  border-bottom: 1px solid var(--cm-line);
+  margin-bottom: 18px;
+}
+.auth-tab {
+  padding: 8px 0 9px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--cm-mute);
+  font-family: var(--cm-font-en);
+  font-weight: 900;
+  font-style: italic;
+  font-size: 13px;
+  letter-spacing: .16em;
+  cursor: pointer;
+}
+.auth-tab.is-on { color: var(--cm-ink); border-bottom-color: var(--cm-red); }
+.auth-x {
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--cm-line);
+  border-radius: 0;
+  background: #fff;
+  color: var(--cm-ink-2);
+  font-family: var(--cm-font-num);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.auth-x:hover { border-color: var(--cm-red); color: var(--cm-ink); }
+
+.auth-view[hidden] { display: none; }
+.auth-title {
+  margin-bottom: 4px;
+  font-family: var(--cm-font-en);
+  font-weight: 900;
+  font-style: italic;
+  font-size: 19px;
+  letter-spacing: .02em;
+  color: var(--cm-ink);
+}
+.auth-note {
+  margin-bottom: 14px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--cm-mute);
+  letter-spacing: .04em;
+}
+.auth-note b { color: var(--cm-ink-2); }
+
+.auth-form { display: grid; gap: 12px; }
+.auth-field { display: grid; gap: 6px; }
+.auth-label {
+  font-family: var(--cm-font-en);
+  font-weight: 900;
+  font-style: italic;
+  font-size: 10.5px;
+  letter-spacing: .24em;
+  color: var(--cm-mute);
+}
+.auth-input {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--cm-line-2);
+  border-radius: 0;
+  background: #fff;
+  color: var(--cm-ink);
+  font-family: var(--cm-font);
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.auth-input:focus { border-color: var(--cm-accent); }
+.auth-err {
+  min-height: 1.35em;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--cm-red-dk);
+  letter-spacing: .02em;
+}
+.auth-err:empty { visibility: hidden; }
+.auth-submit {
+  justify-self: start;
+  padding: 10px 20px;
+  border: 1px solid var(--cm-accent);
+  border-radius: 0;
+  background: var(--cm-accent);
+  color: #fff;
+  font-family: var(--cm-font-en);
+  font-weight: 900;
+  font-style: italic;
+  font-size: 12.5px;
+  letter-spacing: .2em;
+  cursor: pointer;
+  transition: background-color .18s ease, border-color .18s ease;
+}
+.auth-submit:hover { background: var(--cm-accent-2); border-color: var(--cm-accent-2); }
+.auth-submit[disabled] { opacity: .55; cursor: default; }
+
+/* 我的评论：一眼看清"我发过什么、在哪一篇" */
+.auth-mine-list { display: grid; gap: 12px; }
+.auth-mine {
+  padding: 11px 12px;
+  border: 1px solid var(--cm-line);
+  border-left: 3px solid var(--cm-soft);
+  background: var(--cm-tint);
+}
+.auth-mine-text {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--cm-ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.auth-mine-meta {
+  margin-top: 7px;
+  display: flex;
+  gap: 12px;
+  font-family: var(--cm-font-num);
+  font-size: 11px;
+  color: var(--cm-mute);
+}
+.auth-mine-link { color: var(--cm-accent); border-bottom: 1px solid var(--cm-line-2); }
+
+/* ============================================================
+   3. 评论区（article.html）
+   ------------------------------------------------------------
+   .comments / .comments-head / .comments-note 沿用 pages.css 的骨架类名，
+   只把旧评论客户端留下的"深色虚线卡片"清掉：
+   .comments-box 现在是纯容器，卡片感交给内部的小块。
+   ============================================================ */
+.comments-box {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+#commentsMount:empty { display: none; }
+
+.cm-composer {
+  display: grid;
+  gap: 10px;
+  padding: 14px 15px;
+  border: 1px solid var(--cm-line);
+  background: var(--cm-tint);
+  margin-bottom: 18px;
+}
+.cm-who {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--cm-mute);
+  letter-spacing: .06em;
+}
+.cm-who b { color: var(--cm-ink-2); font-weight: 700; }
+.cm-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--cm-red);
+  color: var(--cm-red-dk);
+  font-family: var(--cm-font-en);
+  font-weight: 900;
+  font-style: italic;
+  font-size: 10px;
+  letter-spacing: .16em;
+}
+.cm-input {
+  width: 100%;
+  min-height: 88px;
+  padding: 10px 11px;
+  border: 1px solid var(--cm-line-2);
+  border-radius: 0;
+  background: #fff;
+  color: var(--cm-ink);
+  font-family: var(--cm-font);
+  font-size: 14.5px;
+  line-height: 1.75;
+  resize: vertical;
+}
+.cm-input:focus { border-color: var(--cm-accent); }
+.cm-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cm-count {
+  margin-left: auto;
+  font-family: var(--cm-font-num);
+  font-size: 11px;
+  letter-spacing: .1em;
+  color: var(--cm-mute);
+}
+.cm-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--cm-accent);
+  border-radius: 0;
+  background: var(--cm-accent);
+  color: #fff;
+  font-family: var(--cm-font-en);
+  font-weight: 900;
+  font-style: italic;
+  font-size: 12px;
+  letter-spacing: .18em;
+  cursor: pointer;
+  transition: background-color .18s ease, border-color .18s ease;
+}
+.cm-btn:hover { background: var(--cm-accent-2); border-color: var(--cm-accent-2); }
+.cm-btn[disabled] { opacity: .55; cursor: default; }
+.cm-btn.is-ghost {
+  background: #fff;
+  color: var(--cm-ink-2);
+  border-color: var(--cm-line-2);
+  font-style: normal;
+  font-family: var(--cm-font);
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+.cm-btn.is-ghost:hover { background: var(--cm-tint); color: var(--cm-ink); border-color: var(--cm-accent); }
+
+/* 未登录：一块就地提示，按钮开的是同一个模态框（不跳转） */
+.cm-signin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.cm-signin p { font-size: 13.5px; color: var(--cm-ink-2); }
+.cm-signin .cm-btn { margin-left: auto; }
+
+.cm-note { font-size: 12.5px; line-height: 1.6; color: var(--cm-red-dk); }
+.cm-note:empty { display: none; }
+
+.cm-state {
+  padding: 14px 0;
+  font-size: 13.5px;
+  color: var(--cm-mute);
+  letter-spacing: .04em;
+}
+.cm-state[hidden] { display: none; }
+.cm-state.is-error { color: var(--cm-red-dk); }
+
+/* ---- 列表 ---- */
+.cm-list { border-top: 1px solid var(--cm-line); }
+.cm-list:empty { border-top: 0; }
+
+.cm-item {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 13px;
+  padding: 17px 0;
+  border-bottom: 1px solid var(--cm-line);
+}
+.cm-ava {
+  width: 40px; height: 40px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--cm-line);
+  background: #fff;
+}
+.cm-ava img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cm-ava-init {
+  font-family: var(--cm-font-en);
+  font-weight: 900;
+  font-style: italic;
+  font-size: 15px;
+  color: var(--cm-ink-2);
+  text-transform: uppercase;
+}
+
+.cm-main { min-width: 0; }
+.cm-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+.cm-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--cm-ink);
+  letter-spacing: .02em;
+  overflow-wrap: anywhere;
+}
+.cm-time {
+  font-family: var(--cm-font-num);
+  font-size: 11px;
+  letter-spacing: .08em;
+  color: var(--cm-mute);
+}
+.cm-reply-to {
+  font-family: var(--cm-font-num);
+  font-size: 11px;
+  color: var(--cm-mute);
+}
+.cm-text {
+  font-size: 14.5px;
+  line-height: 1.85;
+  color: var(--cm-ink);
+  /* 换行靠 CSS，不靠 <br> 拼接：内容永远是一次 textContent 写进去的 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cm-acts {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 7px;
+}
+.cm-act {
+  padding: 2px 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--cm-mute);
+  font-family: var(--cm-font);
+  font-size: 12px;
+  letter-spacing: .1em;
+  cursor: pointer;
+}
+.cm-act:hover { color: var(--cm-accent); border-bottom-color: var(--cm-accent); }
+.cm-act.is-danger:hover { color: var(--cm-red-dk); border-bottom-color: var(--cm-red-dk); }
+.cm-act.is-armed { color: #fff; background: var(--cm-red-dk); padding: 2px 8px; }
+
+/* 一级回复：左侧一条发丝线 + 缩进，不再往下嵌套 */
+.cm-replies {
+  display: grid;
+  margin-top: 4px;
+}
+.cm-replies:empty { margin-top: 0; }
+.cm-replies .cm-item {
+  padding: 14px 0 14px 14px;
+  border-bottom: 0;
+  border-left: 2px solid var(--cm-line);
+}
+.cm-replies .cm-item:last-child { padding-bottom: 0; }
+.cm-replies .cm-ava { width: 34px; height: 34px; }
+.cm-replies .cm-item { grid-template-columns: 34px minmax(0, 1fr); }
+
+/* 内联回复表单 */
+.cm-reply-form {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 12px 13px;
+  border: 1px solid var(--cm-line);
+  background: var(--cm-surface);
+}
+.cm-reply-form[hidden] { display: none; }
+.cm-reply-form .cm-input { min-height: 70px; }
+
+@media (max-width: 620px) {
+  .cm-item { grid-template-columns: 34px minmax(0, 1fr); gap: 10px; }
+  .cm-ava { width: 34px; height: 34px; }
+  .cm-signin .cm-btn { margin-left: 0; }
+  .auth-panel { padding: 16px 15px 18px; }
+}
+
+/* ============================================================
+   4. 窄屏：给右上角入口让位
+   ------------------------------------------------------------
+   <980px 时内页的侧边栏变成顶部抽屉，MENU 按钮被 margin-left:auto
+   推到最右侧 —— 与固定的登录入口正好抢同一块地方。
+   这里把 .nav-bar 的右内边距留出来（按钮宽度上限 .auth-btn.is-user
+   的 14ch + padding ≈ 150px，取 132px 够用），比挪登录入口更稳：
+   入口的位置在五个页面与桌面端保持同一个坐标。
+   ============================================================ */
+@media (max-width: 980px) {
+  .nav-bar { padding-right: 132px; }
+}
+@media (max-width: 620px) {
+  .nav-bar { padding-right: 118px; }
+  .auth-entry { top: 13px; right: 14px; }
+  .auth-btn { padding: 6px 12px; letter-spacing: .14em; }
+}
+
+/* 首页的扇形菜单在窄屏是"纵向居中堆叠"（menu.js 的 is-stacked），
+   垂直方向落在视口中段，与顶部的登录入口天然不重叠；这里再保一道：
+   窗口很矮（<560px）时把入口压到最顶部、并把扇形整体下移一点。 */
+@media (max-height: 560px) {
+  .auth-entry { top: 10px; }
+  .fan.is-stacked { top: 56%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-entry, .auth-btn, .cm-btn, .auth-submit, .auth-tab { transition-duration: .01ms; }
+}

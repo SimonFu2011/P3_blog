@@ -6,6 +6,10 @@
 <title>SimonFu的个人站</title>
 <meta name="description" content="个人博客入口。坠入水中。">
 <link rel="stylesheet" href="css/style.css">
+<!-- 右上角登录入口（本轮新增）。放在 style.css 之后：它只用到 style.css 的
+     既有变量（--ink/--white/--red/--sky/--font-*），不引入新的设计语言；
+     入场遮罩未解除前该入口由 CSS 隐藏（见文件里 §1 的说明）。 -->
+<link rel="stylesheet" href="css/comments.css">
 </head>
 <body class="is-entry">
 
@@ -286,6 +290,26 @@
     <ul class="fan-list" id="fanList"></ul>
   </nav>
 
+  <!-- ============================================================
+       右上角用户入口
+       ------------------------------------------------------------
+       标记写在 HTML 里（脚本挂了也看得见），由 js/auth-ui.js 接管：
+       未登录显示「登录」，有会话时换成用户名 + 下拉（我的评论 / 退出登录）。
+
+       三条硬约束（都在 css/comments.css §1 与 §4 里落实）：
+         · 入场期间不可见也不可点：body.is-entry / is-falling 时
+           visibility:hidden —— 绝不遮挡 ENTER / 滚轮那套入场交互；
+           z-index 取 40，压在入场遮罩（50）之下、扇形菜单（15）之上。
+         · 不与扇形菜单重叠：入口固定在右上角，扇形以 42%~46% 视口宽为原点
+           沿 ±16° 展开，纵向落在视口中段；窄屏扇形改纵向居中堆叠，
+           与顶部的入口天然错开（矮窗口再兜一道媒体查询）。
+         · 位置与另外四个页面完全一致：同一个 .auth-entry 类、同一组坐标。
+       ============================================================ -->
+  <div class="auth-entry" id="authEntry" data-auth-entry>
+    <button class="auth-btn" type="button" data-auth-open
+            aria-haspopup="dialog" aria-expanded="false">登录</button>
+  </div>
+
   <!-- 底部命令提示 -->
   <footer class="cmdbar" id="cmdbar">
     <div class="cmd-label">
@@ -333,6 +357,9 @@
 <script src="js/water.js" defer></script>
 <script src="js/dock.js" defer></script>
 <script src="js/menu.js" defer></script>
+<!-- 右上角登录入口：只做会话查询与模态框，不参与入场时序 ——
+     入场期间它被 CSS 藏起来，boot.js 的 ENTER/滚轮完全不受影响。 -->
+<script src="js/auth-ui.js" defer></script>
 <script src="js/boot.js" defer></script>
 </body>
 </html>

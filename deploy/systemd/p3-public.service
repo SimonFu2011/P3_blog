@@ -1,0 +1,172 @@
+[Unit]
+Description=P3_blog public login/comment API (loopback-only, proxied by BT nginx)
+Documentation=file:/srv/blog/repo/deploy/PLAN-PUBLIC-LOGIN.md
+# 排在后端依赖之后、但不强依赖：MySQL 起不来时本服务照样启动，
+# 此时 /api/auth/me 回 200 + user:null + db:"down"，其余端点回 503，进程不崩。
+# 这比"因为数据库慢就整个服务起不来"更好排障 —— 故障面被压在状态码里。
+After=network.target mysqld.service
+Wants=mysqld.service
+
+[Service]
+Type=simple
+# 【独立 uid（审计 S3）】原来是 User=blog —— 与管理面 p3-admin **同一个 uid**，
+# 于是"公开面被拿下 = 管理面被拿下"这条通道是开着的：blog 身份能直接打开
+# /srv/blog/repo/.admin/passphrase.json（管理口令的 PBKDF2 哈希）与 session.json
+# （管理端会话令牌）。代码层"不 import 管理面模块"只挡住了"代码里没有那些路径"，
+# 挡不住"同一个 uid 能读"。
+#
+# 现在公开服务用自己的账号 p3public（部署时创建：见 deploy/PLAN-PUBLIC-LOGIN.md）：
+#     useradd --system --no-create-home --shell /usr/sbin/nologin p3public
+# 它只需要：读代码（/srv/blog/repo 下 world-readable 的部分）、读 /etc/p3blog 下的
+# 公开端口配置（由 InaccessiblePaths 把不该看的挡掉）、连 127.0.0.1:3306（TCP）。
+User=p3public
+Group=p3public
+WorkingDirectory=/srv/blog/repo/blog-enter
+
+# PATH 必须显式给出：systemd 不继承登录 shell 的 PATH，而 node 装在
+# /usr/local/bin。用 /usr/bin/env node 或裸 node 都会以 "command not found" 失败。
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
+
+# 数据库连接串从 /etc/p3blog/public.env 取（t13 已建好：600 root:blog，含
+# P3_DB_HOST/P3_DB_PORT/P3_DB_NAME/P3_DB_USER/P3_DB_PASSWORD/P3_SESSION_MAX_AGE_DAYS）。
+# 读它的是 systemd(PID1，root)，所以 600 完全够用；**不要放宽成 644**
+# ——那等于把 p3app 口令给全机每个用户看。服务进程以 blog 运行，
+# 既读不到也不需要读这个文件（变量由 systemd 注入）。
+EnvironmentFile=/etc/p3blog/public.env
+
+# 0027 = 新建文件 640、目录 750。这里与 p3-admin 的取舍**不完全相同**，别照抄结论：
+#   · p3-admin 必须是 0027，因为它会 fork blog-publish 往站点根目录写产物，
+#     那些文件要给 nginx（www 组）读；设成 0077 会让产物变成 600/700 → 线上 403。
+#   · 本服务**不写任何文件**：代码只读、数据在 MySQL（TCP）、日志进 journal。
+#     umask 在这里实际上不产生任何文件，保持 0027 只是为了与仓库其它单元一致，
+#     并且万一将来加了落盘（比如临时导出），不会突然写出 600 把别人卡住。
+#   · 站点产物的 2775/664 仍然由 blog-publish.sh 在发布时统一归一，不靠这里。
+UMask=0027
+
+# 【端口与监听】
+# --listen 127.0.0.1  只绑回环：公开面由 nginx 收口（8850 不对公网暴露）。
+#                     本服务对 --listen 有硬校验，非回环值直接拒绝启动(exit 4)。
+# --port 8850         与 p3-admin(8849) / p3-admin-proxy(8848) / Waline(8360) 不冲突。
+#
+# 【--public-host 43.108.100.116 —— 必须写，漏了会全站 403】
+#   nginx 反代原样传 Host: 43.108.100.116（见 nginx-locations.conf 的 $host），
+#   而后端 Host 白名单默认**只含回环名**。不写这条，所有 API 都被判
+#   "host not allowed" → 403，前端看起来像"服务没起来"。
+#   回环名永远在名单里，所以本机 curl 直连（Host: 127.0.0.1:8850）不受影响。
+#   注意非回环 Host 只接受 80 / 443 / 8850 端口形式（security.assertHost）。
+#
+# 【--public-origin http://43.108.100.116 —— Origin 精确白名单】
+#   同源判定的第二条闸；不给通配。因为是 http:// 而不是 https://，cookie
+#   **不带** Secure —— 这正是当前"明文 HTTP 上线"的现实：口令与会话在公网上
+#   明文传输（安全评审 t17 已把这条列为高危）。域名与证书就绪后改成
+#   --public-origin https://simonfu.xin 并补 --public-host simonfu.xin。
+#
+# 【--trust-proxy —— 必须开，否则限流退化成全站共享一个桶】
+#   开了之后客户端 IP 取 X-Forwarded-For 的**最后一段**，也就是 nginx 亲自
+#   append 的 $remote_addr；客户端自己塞的伪造值排在前面、被忽略
+#   （所以 nginx 段用 $proxy_add_x_forwarded_for 追加是安全的）。
+#   不开的话每个请求的对端都是 127.0.0.1：auth.login「每 IP 15 分钟 10 次」
+#   会变成**全站共用一个计数器** —— 任何人连错 10 次口令，就把所有用户锁在
+#   429 外面一小时（注册同理，5 次/小时）。这是可用性事故，不是理论风险。
+#   信任的边界：本服务只绑回环 + nginx 只放行明确列举的路径 = 公网无法绕过 nginx。
+#   但"对端在回环"本身**不足以**证明请求来自我们那份 nginx（本机任何进程都能
+#   连上回环），所以还必须配上下一段的密钥校验，两者缺一不可。
+#
+# 【--proxy-secret-file —— 与 nginx 的密钥头成对，缺了它 --trust-proxy 就是个洞】
+#   只开 --trust-proxy 只证明"对端在回环"，不证明"请求来自我们那份 nginx"：
+#   本机任意进程（被入侵的低权限服务、SSRF）都能直连 8850 自塞
+#   "X-Forwarded-For: 1.2.3.4" —— 后端取最后一段，于是伪造的 IP 直接进限流键
+#   与 auth_log（限流形同虚设、审计记假地址）。
+#   nginx 侧每条 /api/* location 都 include 了
+#   /etc/p3blog/public-proxy-header.conf（只有 root 能读），把同一密钥放进
+#   X-Admin-Proxy-Secret；本参数让后端要求该头匹配，不匹配直接拒绝。
+#   ⚠️ 语义（t14 定稿，别改成"软降级"）：
+#      给了本参数 → 密钥文件**必须存在且非空**，否则**启动失败**（fail-fast）；
+#      完全不给本参数 → 允许启动，但强制关闭代理信任并打告警（仅本机开发/无 nginx 调试）。
+#      不存在"给了参数、文件没了、于是悄悄不校验"的中间状态。
+#   ⚠️ 部署顺序（见 PLAN-PUBLIC-LOGIN.md 第 4/5/6 步）：第 4 步一次把密钥的两份文件
+#      （后端读的 secret + nginx 读的 header）都建好 → 第 5 步 nginx -t + reload →
+#      第 6 步再 start/restart 本服务。这样"后端要密钥但 nginx 没送"与"nginx 送头但
+#      后端不校验"两个中间态都不存在，窗口是 0（不是 0.5 秒也不是 30 秒）。
+ExecStart=/usr/local/bin/node /srv/blog/repo/blog-enter/server/public-server.mjs \
+  --listen 127.0.0.1 \
+  --port 8850 \
+  --public-host 43.108.100.116 \
+  --public-origin http://43.108.100.116 \
+  --trust-proxy \
+  --proxy-secret-file /etc/p3blog/public-proxy-secret
+
+Restart=on-failure
+RestartSec=3
+
+# ---- 沙箱 ----
+# ProtectSystem 的两个取值差别（很容易写错）：
+#   full   → 只有 /usr /boot /etc 变只读，**其余文件系统照旧可写**
+#   strict → 整个文件系统只读，只有 ReadWritePaths 里列出的路径可写
+# p3-admin 用 strict 但仍要写仓库与站点根，所以它列了两条 ReadWritePaths。
+# 本服务**一个可写路径都不需要**（代码只读、数据在 MySQL、日志进 journal），
+# 所以用 strict 且不给 ReadWritePaths —— 沙箱严格强于 p3-admin，
+# 而不是把它那份可写面照抄过来。
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# 代码与 /etc/p3blog 只需要可读。显式写出来，是为了让"这里没有可写面"成为
+# 一条读得出来的结论，而不是靠读者自己推断 strict 的默认值。
+ReadOnlyPaths=/srv/blog/repo /etc/p3blog
+
+# 【显式挡住管理面凭据（审计 S3）】
+# 独立 uid 已经让"公开进程恰好能读 .admin"不再成立（目录属主是 blog:blog 00700；
+# 写五位是因为 0700 清不掉仓库收窄时 2775 留下的 setgid —— 见 deploy/bin/p3-fix-repo-perms.sh），
+# 这里再挡一层是**纵深防御**：将来谁把 .admin 的权限放宽一点（或改了属主、
+# 或把服务临时改回 blog），这条仍然让公开进程看不到它。
+#   · /srv/blog/repo/.admin          管理面运行时数据：passphrase.json（口令哈希）、
+#                                    session.json（管理端令牌）、backups/、trash/
+#   · /etc/p3blog/proxy-secret       反代共享密钥（管理面用；公开服务用的是
+#                                    public-proxy-secret，不需要这个）
+#   · /etc/p3blog/public.env         虽然它只含 p3app 的库口令（不是管理面凭据），
+#                                    但公开进程**不需要**它 ——
+#                                    变量由 systemd 以 root 读入后注入，进程本身读文件是多余的。
+#   ⚠️ **不要**把 /etc/p3blog/public-proxy-secret 也列进来：它是
+#      ExecStart 里 --proxy-secret-file 指的**同一个文件**，公开服务启动时必须能读。
+#      挡住它 = 服务起不来（或按 fail-fast 语义 exit 7）。
+#
+# 【三类路径的权限关系（别记反，这里曾经写反过）】
+#   判断标准只有一条：**公开进程（p3public）在运行中是否需要读它**。
+#     ① 需要读 → 必须可读：/etc/p3blog/public-proxy-secret
+#          权限 640 root:p3public（组是可读的那个组，**不是 blog**）。
+#          为什么必须给组读：进程以 User=p3public 运行，只靠属主 root 的 640
+#          它读不到，会按 fail-fast exit 7 起不来。
+#     ② 不需要读、且是凭据 → 必须不可读：
+#          /srv/blog/repo/.admin          管理面运行时数据（passwd 哈希、会话令牌、备份）
+#          /etc/p3blog/proxy-secret       管理面用的反代共享密钥（公开服务用的是上一条那个）
+#          /etc/p3blog/public.env         只含 p3app 库口令；变量由 systemd 以 root 读入后
+#                                         注入，进程自己去读文件是多余的
+#        这三条同时靠两件事保证：① .admin 目录本身是 00700 blog:blog（换 uid 后天然读不到）；
+#        ② 下面这行 InaccessiblePaths 显式挡掉（纵深防御：将来谁把权限放宽/把服务改回 blog，
+#        这一层仍然生效）。
+# 注意：InaccessiblePaths 在 systemd ≥ 231 可用（本机 240+，满足）。
+InaccessiblePaths=/srv/blog/repo/.admin /etc/p3blog/proxy-secret /etc/p3blog/public.env
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

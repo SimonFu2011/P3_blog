@@ -1,0 +1,20 @@
+{
+  "name": "p3-blog-enter-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "P3_blog 后端（blog-enter/server/**，含公开服务与本地管理服务）。唯一依赖是 mysql2：公开登录/评论服务的 MySQL 驱动。站点前端与线上产物仍然零依赖。",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "public": "node public-server.mjs",
+    "public:degraded": "node public-server.mjs --allow-degraded",
+    "admin": "node dev-server.mjs",
+    "test": "node tests/public-api.test.mjs",
+    "test:all": "node tests/run-all.mjs"
+  },
+  "dependencies": {
+    "mysql2": "^3.11.0"
+  }
+}
